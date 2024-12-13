@@ -17,6 +17,8 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--output_dir", type=str, default="beats/runs")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--checkpoint_freq", type=int, default=1,
+                      help="Save checkpoint every N epochs")
     return parser.parse_args()
 
 def advanced_audio_contrastive_loss(features, temperature=0.1):
@@ -121,7 +123,7 @@ def main():
         accelerator.print(f"Epoch {epoch} completed, Average Loss: {avg_loss:.4f}")
         
         # Save checkpoint on main process only
-        if accelerator.is_main_process:
+        if accelerator.is_main_process and (epoch + 1) % args.checkpoint_freq == 0:
             unwrapped_model = accelerator.unwrap_model(model)
             checkpoint = {
                 'epoch': epoch,
