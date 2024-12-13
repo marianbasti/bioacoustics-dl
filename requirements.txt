@@ -1,0 +1,5 @@
+torch
+torchaudio
+accelerate
+numpy
+tqdm
