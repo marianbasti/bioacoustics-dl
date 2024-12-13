@@ -95,8 +95,11 @@ def main():
             padding_mask = torch.zeros(audio.shape[0], audio.shape[1]).bool()
             padding_mask = accelerator.prepare(padding_mask)[0]
             
-            # Forward pass
-            features, _ = model.extract_features(audio, padding_mask)
+            # Fix: Handle DDP wrapped model
+            if hasattr(model, 'module'):
+                features, _ = model.module.extract_features(audio, padding_mask)
+            else:
+                features, _ = model.extract_features(audio, padding_mask)
             
             # Compute SSL loss (example: use features for contrastive learning)
             # This is a simple example - you might want to implement more sophisticated SSL objectives
