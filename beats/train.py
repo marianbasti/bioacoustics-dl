@@ -91,21 +91,12 @@ def main():
         total_loss = 0
         
         for batch_idx, audio in enumerate(dataloader):
-            # Calculate expected fbank length based on audio length
-            # BEATs uses 25ms frame_length and 10ms frame_shift
-            # Therefore: num_frames = (audio_length_ms - frame_length) / frame_shift + 1
-            audio_length_ms = audio.shape[1] / 16  # assuming 16kHz sampling rate
-            num_frames = int((audio_length_ms - 25) / 10 + 1)
-            
-            # Create padding mask matching fbank dimensions
-            padding_mask = torch.zeros((audio.shape[0], num_frames), dtype=torch.bool)
-            padding_mask = accelerator.prepare(padding_mask)[0]
-            
-            # Fix: Handle DDP wrapped model
+            # For BEATs, we should pass None as padding_mask since we're using fixed-length inputs
+            # The model will handle the padding internally based on the fbank features
             if hasattr(model, 'module'):
-                features, _ = model.module.extract_features(audio, padding_mask)
+                features, _ = model.module.extract_features(audio, padding_mask=None)
             else:
-                features, _ = model.extract_features(audio, padding_mask)
+                features, _ = model.extract_features(audio, padding_mask=None)
             
             # Compute SSL loss (example: use features for contrastive learning)
             # This is a simple example - you might want to implement more sophisticated SSL objectives
