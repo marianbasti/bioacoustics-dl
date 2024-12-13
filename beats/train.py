@@ -91,8 +91,9 @@ def main():
         total_loss = 0
         
         for batch_idx, audio in enumerate(dataloader):
-            # Create padding mask (assuming no padding in fixed-length samples)
-            padding_mask = torch.zeros(audio.shape[0], audio.shape[1]).bool()
+            # Create padding mask with correct dimensions (batch_size,)
+            # Since we're using fixed-length samples, we can use all False
+            padding_mask = torch.zeros(audio.shape[0], dtype=torch.bool)
             padding_mask = accelerator.prepare(padding_mask)[0]
             
             # Fix: Handle DDP wrapped model
