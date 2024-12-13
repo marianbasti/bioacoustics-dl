@@ -65,8 +65,6 @@ def main():
     # Load pre-trained weights
     model.load_state_dict(checkpoint['model'])
     
-    model = model.to(device)
-    
     # Setup dataset and dataloader
     dataset = AudioDataset(args.data_dir)
     dataloader = DataLoader(
