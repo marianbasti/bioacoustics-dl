@@ -1,73 +1,36 @@
-
-import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
-from mplcursors import cursor
 import numpy as np
 import torch
 from pathlib import Path
+import gradio as gr
+from sklearn.manifold import TSNE
+import umap
+import matplotlib.pyplot as plt
 
 # Import from original vis.py
 from vis import load_trained_model, parse_grid_params, DEFAULT_GRID
 from dataset import AudioDataset
 from torch.utils.data import DataLoader
 
-class RealTimeVisualizerWindow(QMainWindow):
-    def __init__(self, features, filenames, method='tsne', perplexity=30, 
-                 n_neighbors=15, min_dist=0.1):
-        super().__init__()
-        self.setWindowTitle("Audio Features Visualization")
-        self.setGeometry(100, 100, 800, 800)
+def create_visualization(features, filenames, method, perplexity, n_neighbors, min_dist):
+    plt.figure(figsize=(10, 10))
+    
+    if method == 'tsne':
+        reducer = TSNE(n_components=2, random_state=42, perplexity=perplexity)
+        params_str = f'perplexity={perplexity}'
+    else:
+        reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
+        params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
 
-        # Create the main widget and layout
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
-
-        # Create the figure and canvas
-        self.figure = Figure(figsize=(8, 8))
-        self.canvas = FigureCanvas(self.figure)
-        layout.addWidget(self.canvas)
-        
-        # Initialize the plot
-        self.ax = self.figure.add_subplot(111)
-        self.scatter = None
-        self.features = features
-        self.filenames = filenames
-        
-        # Start visualization
-        self.visualize(method, perplexity, n_neighbors, min_dist)
-
-    def visualize(self, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
-        from sklearn.manifold import TSNE
-        import umap
-        
-        # Initialize reducer based on method
-        if method == 'tsne':
-            reducer = TSNE(n_components=2, random_state=42, perplexity=perplexity)
-            params_str = f'perplexity={perplexity}'
-        else:
-            reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
-            params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
-
-        # Fit and transform the data
-        embedded = reducer.fit_transform(self.features)
-        
-        # Plot the points
-        self.ax.clear()
-        self.scatter = self.ax.scatter(embedded[:, 0], embedded[:, 1], alpha=0.5)
-        self.ax.set_title(f'Audio Features Visualization\n{method.upper()}\n({params_str})')
-        
-        # Add interactive hover annotations
-        cursor = mplcursors.cursor(self.scatter, hover=True)
-        @cursor.connect("add")
-        def on_hover(sel):
-            point_idx = sel.target.index
-            sel.annotation.set_text(Path(self.filenames[point_idx]).name)
-        
-        self.canvas.draw()
+    embedded = reducer.fit_transform(features)
+    
+    plt.scatter(embedded[:, 0], embedded[:, 1], alpha=0.5)
+    plt.title(f'Audio Features Visualization\n{method.upper()}\n({params_str})')
+    
+    # Add annotations for the closest point to mouse hover
+    fig = plt.gcf()
+    ax = plt.gca()
+    
+    return fig
 
 def main():
     import argparse
@@ -104,9 +67,6 @@ def main():
                            '"umap": {"n_neighbors": [5, 15, 30], "min_dist": [0.1, 0.5]}}\'')
     args = parser.parse_args()
 
-    # Initialize PyQt application
-    app = QApplication(sys.argv)
-    
     # Setup model and data
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = load_trained_model(args.checkpoint_path).to(device)
@@ -127,15 +87,25 @@ def main():
     
     features = np.concatenate(features, axis=0)
     
-    # Create and show the visualization window
-    window = RealTimeVisualizerWindow(features, filenames,
-                                    method=args.methods[0],
-                                    perplexity=args.perplexity,
-                                    n_neighbors=args.n_neighbors,
-                                    min_dist=args.min_dist)
-    window.show()
+    # Create Gradio interface
+    def update_plot(method, perplexity, n_neighbors, min_dist):
+        fig = create_visualization(features, filenames, method, perplexity, n_neighbors, min_dist)
+        return fig
     
-    sys.exit(app.exec_())
+    iface = gr.Interface(
+        fn=update_plot,
+        inputs=[
+            gr.Radio(["tsne", "umap"], label="Visualization Method", value="tsne"),
+            gr.Slider(5, 50, value=30, step=5, label="t-SNE Perplexity"),
+            gr.Slider(2, 100, value=15, step=1, label="UMAP n_neighbors"),
+            gr.Slider(0.0, 1.0, value=0.1, step=0.1, label="UMAP min_dist")
+        ],
+        outputs=gr.Plot(),
+        title="Audio Features Visualization",
+        description="Visualize audio features using different dimensionality reduction methods"
+    )
+    
+    iface.launch(share=True)
 
 if __name__ == "__main__":
     main()

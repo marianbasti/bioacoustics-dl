@@ -8,5 +8,4 @@ umap-learn
 matplotlib
 cupy-cuda12x
 cuml-cu12 --extra-index-url=https://pypi.ngc.nvidia.com
-PyQt5
-mplcursors
+gradio
