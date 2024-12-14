@@ -92,7 +92,7 @@ def main():
         model.train()
         total_loss = 0
         
-        for batch_idx, audio in enumerate(dataloader):
+        for batch_idx, (audio, _) in enumerate(dataloader):  # Modified this line to unpack
             # For BEATs, we should pass None as padding_mask since we're using fixed-length inputs
             # The model will handle the padding internally based on the fbank features
             if hasattr(model, 'module'):

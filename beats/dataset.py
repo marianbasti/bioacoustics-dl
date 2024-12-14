@@ -31,15 +31,16 @@ class AudioDataset(Dataset):
         """Return the total number of audio files."""
         return len(self.files)
     
-    def __getitem__(self, idx: int) -> torch.Tensor:
+    def __getitem__(self, idx: int) -> Union[torch.Tensor, str]:
         """Load and preprocess an audio file.
         
         Args:
             idx (int): Index of the audio file to load
             
         Returns:
-            torch.Tensor: Processed audio waveform of shape [samples]
-                         with sample_rate and duration as specified in __init__
+            Union[torch.Tensor, str]: Processed audio waveform of shape [samples]
+                                      with sample_rate and duration as specified in __init__,
+                                      and the filename as a string.
         """
         audio_path = self.files[idx]
         
@@ -62,4 +63,4 @@ class AudioDataset(Dataset):
             padding = self.samples - waveform.shape[1]
             waveform = torch.nn.functional.pad(waveform, (0, padding))
             
-        return waveform.squeeze(0)
+        return waveform.squeeze(0), str(audio_path)
