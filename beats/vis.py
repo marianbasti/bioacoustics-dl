@@ -4,6 +4,16 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import umap
 from pathlib import Path
+
+# Add new imports for GPU acceleration
+try:
+    import cupy as cp
+    from cuml.manifold import TSNE as cuTSNE
+    from cuml.manifold import UMAP as cuUMAP
+    GPU_AVAILABLE = True
+except ImportError:
+    GPU_AVAILABLE = False
+
 from torch.utils.data import DataLoader
 from BEATs import BEATs, BEATsConfig
 from dataset import AudioDataset
@@ -34,16 +44,30 @@ def extract_features(model, dataloader, device='cuda'):
 def visualize_features(features, save_path, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
     # Dimensionality reduction
     if method == 'tsne':
-        reducer = TSNE(n_components=2, random_state=42, perplexity=perplexity)
-    else:
-        reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
-    
-    embedded = reducer.fit_transform(features)
+        if GPU_AVAILABLE:
+            # Move data to GPU and use cuml implementation
+            features_gpu = cp.asarray(features)
+            reducer = cuTSNE(n_components=2, random_state=42, perplexity=perplexity)
+            embedded = reducer.fit_transform(features_gpu)
+            embedded = cp.asnumpy(embedded)
+        else:
+            reducer = TSNE(n_components=2, random_state=42, perplexity=perplexity)
+            embedded = reducer.fit_transform(features)
+    else:  # umap
+        if GPU_AVAILABLE:
+            # Move data to GPU and use cuml implementation
+            features_gpu = cp.asarray(features)
+            reducer = cuUMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
+            embedded = reducer.fit_transform(features_gpu)
+            embedded = cp.asnumpy(embedded)
+        else:
+            reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
+            embedded = reducer.fit_transform(features)
     
     # Create visualization
     plt.figure(figsize=(10, 10))
     plt.scatter(embedded[:, 0], embedded[:, 1], alpha=0.5)
-    plt.title(f'Audio Features Visualization ({method.upper()})')
+    plt.title(f'Audio Features Visualization ({method.upper()}{" (GPU)" if GPU_AVAILABLE else ""})')
     plt.savefig(save_path)
     plt.close()
 
