@@ -5,69 +5,31 @@ import gradio as gr
 from sklearn.manifold import TSNE
 import umap
 import matplotlib.pyplot as plt
-import threading
-import queue
 
 # Import from original vis.py
 from vis import load_trained_model, parse_grid_params, DEFAULT_GRID
 from dataset import AudioDataset
 from torch.utils.data import DataLoader
 
-# Global variables to store features and status
-global_features = []
-global_filenames = []
-global_embedded = None
-extraction_complete = False
-progress_percent = 0
-update_queue = queue.Queue()
-
-def create_or_update_reducer(method, perplexity, n_neighbors, min_dist):
-    if method == 'tsne':
-        return TSNE(n_components=2, random_state=42, perplexity=perplexity)
-    else:
-        return umap.UMAP(random_state=42, n_neighbors=n_neighbors, 
-                        min_dist=min_dist, force_approximation_algorithm=True)
-
-def extract_features(model, dataloader, device, method, perplexity, n_neighbors, min_dist):
-    global global_features, global_filenames, extraction_complete, progress_percent
-    
-    total_batches = len(dataloader)
-    reducer = None
-    
-    with torch.no_grad():
-        for i, (audio, fname) in enumerate(dataloader):
-            # Extract features for current batch
-            audio = audio.to(device)
-            feat, _ = model.extract_features(audio, padding_mask=None)
-            feat = torch.mean(feat, dim=1).cpu().numpy()
-            
-            # Append to global lists
-            global_features.append(feat)
-            global_filenames.extend(fname)
-            
-            # Update progress
-            progress_percent = (i + 1) / total_batches * 100
-            
-            # Perform dimensionality reduction every N batches or at the end
-            if len(global_features) >= 10 or i == total_batches - 1:
-                combined_features = np.concatenate(global_features, axis=0)
-                reducer = create_or_update_reducer(method, perplexity, n_neighbors, min_dist)
-                embedded = reducer.fit_transform(combined_features)
-                update_queue.put(embedded)
-
-    extraction_complete = True
-
-def create_visualization(embedded=None):
-    if embedded is None and not global_embedded:
-        return None
-    
+def create_visualization(features, filenames, method, perplexity, n_neighbors, min_dist):
     plt.figure(figsize=(10, 10))
-    data = embedded if embedded is not None else global_embedded
-    plt.scatter(data[:, 0], data[:, 1], alpha=0.5)
-    plt.title(f'Audio Features Visualization (Progress: {progress_percent:.1f}%)')
     
+    if method == 'tsne':
+        reducer = TSNE(n_components=2, random_state=42, perplexity=perplexity)
+        params_str = f'perplexity={perplexity}'
+    else:
+        reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
+        params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
+
+    embedded = reducer.fit_transform(features)
+    
+    plt.scatter(embedded[:, 0], embedded[:, 1], alpha=0.5)
+    plt.title(f'Audio Features Visualization\n{method.upper()}\n({params_str})')
+    
+    # Add annotations for the closest point to mouse hover
     fig = plt.gcf()
-    plt.close()
+    ax = plt.gca()
+    
     return fig
 
 def main():
@@ -111,18 +73,25 @@ def main():
     dataset = AudioDataset(args.data_dir)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     
+    # Extract features and get filenames
+    features = []
+    filenames = []
+    
+    with torch.no_grad():
+        for audio, fname in dataloader:
+            audio = audio.to(device)
+            feat, _ = model.extract_features(audio, padding_mask=None)
+            feat = torch.mean(feat, dim=1)
+            features.append(feat.cpu().numpy())
+            filenames.extend(fname)
+    
+    features = np.concatenate(features, axis=0)
+    
+    # Create Gradio interface
     def update_plot(method, perplexity, n_neighbors, min_dist):
-        try:
-            while True:
-                try:
-                    embedded = update_queue.get_nowait()
-                    return create_visualization(embedded)
-                except queue.Empty:
-                    break
-        except:
-            pass
-        return create_visualization()
-
+        fig = create_visualization(features, filenames, method, perplexity, n_neighbors, min_dist)
+        return fig
+    
     iface = gr.Interface(
         fn=update_plot,
         inputs=[
@@ -133,20 +102,10 @@ def main():
         ],
         outputs=gr.Plot(),
         title="Audio Features Visualization",
-        description="Visualize audio features using different dimensionality reduction methods",
-        live=True,
-        refresh_every=1
+        description="Visualize audio features using different dimensionality reduction methods"
     )
-    
-    # Start feature extraction in a separate thread
-    extraction_thread = threading.Thread(
-        target=extract_features,
-        args=(model, dataloader, device, "tsne", 30, 15, 0.1)
-    )
-    extraction_thread.start()
     
     iface.launch(share=True)
-    extraction_thread.join()
 
 if __name__ == "__main__":
     main()
