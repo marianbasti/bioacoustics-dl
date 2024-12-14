@@ -6,6 +6,7 @@ from sklearn.manifold import TSNE
 import umap
 import matplotlib.pyplot as plt
 import threading
+import queue
 
 # Import from original vis.py
 from vis import load_trained_model, parse_grid_params, DEFAULT_GRID
@@ -13,52 +14,57 @@ from dataset import AudioDataset
 from torch.utils.data import DataLoader
 
 # Global variables to store features and status
-global_features = None
-global_filenames = None
+global_features = []
+global_filenames = []
+global_embedded = None
 extraction_complete = False
 progress_percent = 0
+update_queue = queue.Queue()
 
-def extract_features(model, dataloader, device, progress_callback):
+def create_or_update_reducer(method, perplexity, n_neighbors, min_dist):
+    if method == 'tsne':
+        return TSNE(n_components=2, random_state=42, perplexity=perplexity)
+    else:
+        return umap.UMAP(random_state=42, n_neighbors=n_neighbors, 
+                        min_dist=min_dist, force_approximation_algorithm=True)
+
+def extract_features(model, dataloader, device, method, perplexity, n_neighbors, min_dist):
     global global_features, global_filenames, extraction_complete, progress_percent
     
-    features = []
-    filenames = []
     total_batches = len(dataloader)
+    reducer = None
     
     with torch.no_grad():
         for i, (audio, fname) in enumerate(dataloader):
+            # Extract features for current batch
             audio = audio.to(device)
             feat, _ = model.extract_features(audio, padding_mask=None)
-            feat = torch.mean(feat, dim=1)
-            features.append(feat.cpu().numpy())
-            filenames.extend(fname)
+            feat = torch.mean(feat, dim=1).cpu().numpy()
+            
+            # Append to global lists
+            global_features.append(feat)
+            global_filenames.extend(fname)
             
             # Update progress
             progress_percent = (i + 1) / total_batches * 100
-            progress_callback(f"Extracting features... {progress_percent:.1f}%")
-    
-    global_features = np.concatenate(features, axis=0)
-    global_filenames = filenames
-    extraction_complete = True
-    progress_callback("Feature extraction complete!")
+            
+            # Perform dimensionality reduction every N batches or at the end
+            if len(global_features) >= 10 or i == total_batches - 1:
+                combined_features = np.concatenate(global_features, axis=0)
+                reducer = create_or_update_reducer(method, perplexity, n_neighbors, min_dist)
+                embedded = reducer.fit_transform(combined_features)
+                update_queue.put(embedded)
 
-def create_visualization(method, perplexity, n_neighbors, min_dist):
-    if not extraction_complete:
+    extraction_complete = True
+
+def create_visualization(embedded=None):
+    if embedded is None and not global_embedded:
         return None
     
     plt.figure(figsize=(10, 10))
-    
-    if method == 'tsne':
-        reducer = TSNE(n_components=2, random_state=42, perplexity=perplexity)
-        params_str = f'perplexity={perplexity}'
-    else:
-        reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
-        params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
-
-    embedded = reducer.fit_transform(global_features)
-    
-    plt.scatter(embedded[:, 0], embedded[:, 1], alpha=0.5)
-    plt.title(f'Audio Features Visualization\n{method.upper()}\n({params_str})')
+    data = embedded if embedded is not None else global_embedded
+    plt.scatter(data[:, 0], data[:, 1], alpha=0.5)
+    plt.title(f'Audio Features Visualization (Progress: {progress_percent:.1f}%)')
     
     fig = plt.gcf()
     plt.close()
@@ -105,12 +111,17 @@ def main():
     dataset = AudioDataset(args.data_dir)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     
-    # Create Gradio interface
-    def update_plot(method, perplexity, n_neighbors, min_dist, progress=gr.Progress()):
-        if not extraction_complete:
-            progress(progress_percent / 100)
-            return None
-        return create_visualization(method, perplexity, n_neighbors, min_dist)
+    def update_plot(method, perplexity, n_neighbors, min_dist):
+        try:
+            while True:
+                try:
+                    embedded = update_queue.get_nowait()
+                    return create_visualization(embedded)
+                except queue.Empty:
+                    break
+        except:
+            pass
+        return create_visualization()
 
     iface = gr.Interface(
         fn=update_plot,
@@ -120,23 +131,21 @@ def main():
             gr.Slider(2, 100, value=15, step=1, label="UMAP n_neighbors"),
             gr.Slider(0.0, 1.0, value=0.1, step=0.1, label="UMAP min_dist")
         ],
-        outputs=[gr.Plot()],
+        outputs=gr.Plot(),
         title="Audio Features Visualization",
         description="Visualize audio features using different dimensionality reduction methods",
-        live=True
+        live=True,
+        refresh_every=1
     )
     
     # Start feature extraction in a separate thread
     extraction_thread = threading.Thread(
         target=extract_features,
-        args=(model, dataloader, device, print)
+        args=(model, dataloader, device, "tsne", 30, 15, 0.1)
     )
     extraction_thread.start()
     
-    # Launch the interface
     iface.launch(share=True)
-    
-    # Wait for extraction to complete before exiting
     extraction_thread.join()
 
 if __name__ == "__main__":
