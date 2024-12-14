@@ -45,29 +45,31 @@ def visualize_features(features, save_path, method='tsne', perplexity=30, n_neig
     # Dimensionality reduction
     if method == 'tsne':
         if GPU_AVAILABLE:
-            # Move data to GPU and use cuml implementation
             features_gpu = cp.asarray(features)
             reducer = cuTSNE(n_components=2, random_state=42, perplexity=perplexity)
             embedded = reducer.fit_transform(features_gpu)
             embedded = cp.asnumpy(embedded)
+            params_str = f'perplexity={perplexity}'
         else:
             reducer = TSNE(n_components=2, random_state=42, perplexity=perplexity)
             embedded = reducer.fit_transform(features)
+            params_str = f'perplexity={perplexity}'
     else:  # umap
         if GPU_AVAILABLE:
-            # Move data to GPU and use cuml implementation
             features_gpu = cp.asarray(features)
             reducer = cuUMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
             embedded = reducer.fit_transform(features_gpu)
             embedded = cp.asnumpy(embedded)
+            params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
         else:
             reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
             embedded = reducer.fit_transform(features)
+            params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
     
     # Create visualization
     plt.figure(figsize=(10, 10))
     plt.scatter(embedded[:, 0], embedded[:, 1], alpha=0.5)
-    plt.title(f'Audio Features Visualization ({method.upper()}{" (GPU)" if GPU_AVAILABLE else ""})')
+    plt.title(f'Audio Features Visualization\n{method.upper()}{" (GPU)" if GPU_AVAILABLE else ""}\n({params_str})')
     plt.savefig(save_path)
     plt.close()
 
