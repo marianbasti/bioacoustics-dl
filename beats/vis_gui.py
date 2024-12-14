@@ -5,13 +5,47 @@ import gradio as gr
 from sklearn.manifold import TSNE
 import umap
 import matplotlib.pyplot as plt
+import threading
 
 # Import from original vis.py
 from vis import load_trained_model, parse_grid_params, DEFAULT_GRID
 from dataset import AudioDataset
 from torch.utils.data import DataLoader
 
-def create_visualization(features, filenames, method, perplexity, n_neighbors, min_dist):
+# Global variables to store features and status
+global_features = None
+global_filenames = None
+extraction_complete = False
+progress_percent = 0
+
+def extract_features(model, dataloader, device, progress_callback):
+    global global_features, global_filenames, extraction_complete, progress_percent
+    
+    features = []
+    filenames = []
+    total_batches = len(dataloader)
+    
+    with torch.no_grad():
+        for i, (audio, fname) in enumerate(dataloader):
+            audio = audio.to(device)
+            feat, _ = model.extract_features(audio, padding_mask=None)
+            feat = torch.mean(feat, dim=1)
+            features.append(feat.cpu().numpy())
+            filenames.extend(fname)
+            
+            # Update progress
+            progress_percent = (i + 1) / total_batches * 100
+            progress_callback(f"Extracting features... {progress_percent:.1f}%")
+    
+    global_features = np.concatenate(features, axis=0)
+    global_filenames = filenames
+    extraction_complete = True
+    progress_callback("Feature extraction complete!")
+
+def create_visualization(method, perplexity, n_neighbors, min_dist):
+    if not extraction_complete:
+        return None
+    
     plt.figure(figsize=(10, 10))
     
     if method == 'tsne':
@@ -21,15 +55,13 @@ def create_visualization(features, filenames, method, perplexity, n_neighbors, m
         reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
         params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
 
-    embedded = reducer.fit_transform(features)
+    embedded = reducer.fit_transform(global_features)
     
     plt.scatter(embedded[:, 0], embedded[:, 1], alpha=0.5)
     plt.title(f'Audio Features Visualization\n{method.upper()}\n({params_str})')
     
-    # Add annotations for the closest point to mouse hover
     fig = plt.gcf()
-    ax = plt.gca()
-    
+    plt.close()
     return fig
 
 def main():
@@ -73,25 +105,13 @@ def main():
     dataset = AudioDataset(args.data_dir)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     
-    # Extract features and get filenames
-    features = []
-    filenames = []
-    
-    with torch.no_grad():
-        for audio, fname in dataloader:
-            audio = audio.to(device)
-            feat, _ = model.extract_features(audio, padding_mask=None)
-            feat = torch.mean(feat, dim=1)
-            features.append(feat.cpu().numpy())
-            filenames.extend(fname)
-    
-    features = np.concatenate(features, axis=0)
-    
     # Create Gradio interface
-    def update_plot(method, perplexity, n_neighbors, min_dist):
-        fig = create_visualization(features, filenames, method, perplexity, n_neighbors, min_dist)
-        return fig
-    
+    def update_plot(method, perplexity, n_neighbors, min_dist, progress=gr.Progress()):
+        if not extraction_complete:
+            progress(progress_percent / 100)
+            return None
+        return create_visualization(method, perplexity, n_neighbors, min_dist)
+
     iface = gr.Interface(
         fn=update_plot,
         inputs=[
@@ -100,12 +120,24 @@ def main():
             gr.Slider(2, 100, value=15, step=1, label="UMAP n_neighbors"),
             gr.Slider(0.0, 1.0, value=0.1, step=0.1, label="UMAP min_dist")
         ],
-        outputs=gr.Plot(),
+        outputs=[gr.Plot()],
         title="Audio Features Visualization",
-        description="Visualize audio features using different dimensionality reduction methods"
+        description="Visualize audio features using different dimensionality reduction methods",
+        live=True
     )
     
+    # Start feature extraction in a separate thread
+    extraction_thread = threading.Thread(
+        target=extract_features,
+        args=(model, dataloader, device, print)
+    )
+    extraction_thread.start()
+    
+    # Launch the interface
     iface.launch(share=True)
+    
+    # Wait for extraction to complete before exiting
+    extraction_thread.join()
 
 if __name__ == "__main__":
     main()
