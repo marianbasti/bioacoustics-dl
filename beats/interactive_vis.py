@@ -35,10 +35,8 @@ def extract_date(filename):
 
 def get_seasonal_color_value(date):
     """Convert date to seasonal value (0-1) for Southern Hemisphere"""
-    # Convert date to day of year (0-365)
     day_of_year = date.timetuple().tm_yday
-    # Shift by 275 days to align with seasonal peaks (December 21 = 355 -> 0.0)
-    shifted_day = (day_of_year + 275) % 365
+    shifted_day = (day_of_year+9) % 365
     return shifted_day / 365.0
 
 def create_seasonal_colorscale():
