@@ -39,69 +39,40 @@ def load_trained_model(checkpoint_path):
     return model
 
 def extract_features(model, dataloader, device, device_ids=None):
-    if not device_ids or len(device_ids) == 1:
-        # Single GPU case
-        model = model.to(device)
-        features_list = []
-        total_batches = len(dataloader)
-        
-        # Pin memory in dataloader for faster transfers
-        dataloader.pin_memory = True
-        
-        with torch.cuda.stream(torch.cuda.Stream()):  # Create dedicated CUDA stream
-            for batch_idx, (waveform, paths) in enumerate(dataloader):
-                logging.info(f"Batch {batch_idx+1}/{total_batches} on device {device}")
-                
-                # Move data to GPU and ensure contiguous memory
-                waveform = waveform.to(device, non_blocking=True).contiguous()
-                
-                with torch.no_grad():
-                    features, _ = model.extract_features(waveform, padding_mask=None)
-                    # Keep features on GPU
-                    features_list.append(features)
-            
-            # Concatenate while still on GPU
-            final_features = torch.cat(features_list, dim=0)
-            
-            if len(final_features.shape) > 2:
-                final_features = final_features.mean(dim=1)
-            
-            # Only move to CPU at the very end
-            final_features = final_features.cpu()
-    else:
+    features_list = []
+    total_batches = len(dataloader)
+    
+    if device_ids and len(device_ids) > 1:
         # Multi-GPU case
-        models = {}
-        for gpu_id in device_ids:
-            device_i = torch.device(f'cuda:{gpu_id}')
-            models[gpu_id] = model.to(device_i)
-        
-        features_list = []
-        total_batches = len(dataloader)
-        
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
+    
+    # Move model to device(s) once
+    model = model.to(device)
+    
+    # Pin memory in dataloader for faster transfers
+    dataloader.pin_memory = True
+    
+    with torch.cuda.stream(torch.cuda.Stream()):  # Create dedicated CUDA stream
         for batch_idx, (waveform, paths) in enumerate(dataloader):
-            # Determine which GPU to use for this batch (round-robin)
-            gpu_id = device_ids[batch_idx % len(device_ids)]
-            device_i = torch.device(f'cuda:{gpu_id}')
+            logging.info(f"Processing batch {batch_idx+1}/{total_batches}")
             
-            logging.info(f"Batch {batch_idx+1}/{total_batches} on GPU {gpu_id}")
+            # Move data to GPU and ensure contiguous memory
+            waveform = waveform.to(device, non_blocking=True).contiguous()
             
-            # Process on selected GPU
-            waveform = waveform.to(device_i, non_blocking=True)
             with torch.no_grad():
-                features, _ = models[gpu_id].extract_features(waveform, padding_mask=None)
-                # Important: Move features to CPU immediately
+                features, _ = model.extract_features(waveform, padding_mask=None)
+                # Move features to CPU immediately to free GPU memory
                 features = features.cpu()
                 if len(features.shape) > 2:
                     features = features.mean(dim=1)
                 features_list.append(features)
             
-            # Log GPU memory
+            # Log memory usage
             if torch.cuda.is_available():
-                logging.info(f"GPU {gpu_id} memory: {torch.cuda.memory_allocated(device_i) / 1024**2:.2f}MB")
+                logging.info(f"GPU memory: {torch.cuda.memory_allocated(device) / 1024**2:.2f}MB")
 
-        # Concatenate all features on CPU
-        final_features = torch.cat(features_list, dim=0)
-
+    # Concatenate all features on CPU
+    final_features = torch.cat(features_list, dim=0)
     logging.info(f"Final combined features shape: {final_features.shape}")
     return final_features
 
