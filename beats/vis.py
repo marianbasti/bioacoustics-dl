@@ -43,6 +43,7 @@ def load_trained_model(checkpoint_path):
 
 def setup_distributed(rank, world_size):
     """Initialize distributed training"""
+    logging.info(f"Setting up distributed training with {world_size} GPUs")
     dist.init_process_group(
         backend='nccl',
         init_method='tcp://localhost:12355',
@@ -56,12 +57,13 @@ def extract_features(model, dataloader, device, device_ids=None):
     
     if device_ids and len(device_ids) > 1:
         # Initialize distributed training
+        logging.info(f"Setting up distributed training with {len(device_ids)} GPUs")
         setup_distributed(device_ids[0], len(device_ids))
-        
+        logging.info(f"Wrapping model in DistributedDataParallel with device {device_ids[0]}")
         # Wrap model in DistributedDataParallel
         model = model.to(device)
         model = DDP(model, device_ids=[device_ids[0]])
-        
+        logging.info(f"Created DistributedDataParallel model on GPU {device_ids[0]}")
         # Create distributed sampler
         sampler = DistributedSampler(dataloader.dataset)
         dataloader = DataLoader(
