@@ -8,6 +8,7 @@ from sklearn.manifold import TSNE
 import umap
 from pathlib import Path
 import logging
+import torchaudio
 
 try:
     import cupy as cp
@@ -38,9 +39,26 @@ def load_trained_model(checkpoint_path):
     model.eval()
     return model
 
+def get_audio_metadata(filepath):
+    """Extract metadata from audio file."""
+    try:
+        info = torchaudio.info(filepath)
+        metadata = {
+            'sample_rate': info.sample_rate,
+            'num_frames': info.num_frames,
+            'num_channels': info.num_channels,
+            'duration': f"{info.num_frames / info.sample_rate:.2f}s",
+            'filename': Path(filepath).name
+        }
+        return metadata
+    except Exception as e:
+        logging.warning(f"Could not extract metadata for {filepath}: {str(e)}")
+        return {'filename': Path(filepath).name, 'error': str(e)}
+
 def extract_features(model, dataloader, device, device_ids=None):
     features_list = []
     paths_list = []  # New list to store paths
+    metadata_list = []  # New list for metadata
     total_batches = len(dataloader)
     
     if device_ids and len(device_ids) > 1:
@@ -72,6 +90,7 @@ def extract_features(model, dataloader, device, device_ids=None):
                     features = features.mean(dim=1)
                 features_list.append(features)
                 paths_list.extend(paths)  # Store paths for this batch
+                metadata_list.extend([get_audio_metadata(p) for p in paths])
             
             # Log memory usage
             if torch.cuda.is_available():
@@ -80,7 +99,7 @@ def extract_features(model, dataloader, device, device_ids=None):
     # Concatenate all features on CPU
     final_features = torch.cat(features_list, dim=0)
     logging.info(f"Final combined features shape: {final_features.shape}")
-    return final_features, paths_list  # Return both features and paths
+    return final_features, paths_list, metadata_list  # Return features, paths, and metadata
 
 def reduce_dimensions(features, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
     """Reduce feature dimensions using t-SNE or UMAP.
@@ -233,8 +252,8 @@ def prepare_features(data_dir, checkpoint_path, batch_size=32, device='cuda', de
                           pin_memory=True,
                           num_workers=2)
     logging.info(f"Found {len(dataset)} audio files")
-    features, paths = extract_features(model, dataloader, device, device_ids)
-    return features, paths
+    features, paths, metadata = extract_features(model, dataloader, device, device_ids)
+    return features, paths, metadata
 
 def main():
     setup_logging()
