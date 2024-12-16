@@ -39,14 +39,15 @@ def load_trained_model(checkpoint_path):
     return model
 
 def extract_features(model, dataloader, device, device_ids=None):
-    model = model.to(device)
     if device_ids and len(device_ids) > 1:
+        logging.info(f"Using {len(device_ids)} GPUs: {device_ids}")
         model = torch.nn.DataParallel(model, device_ids=device_ids)
+    
+    model = model.to(device)
+    model.eval()
     
     features_list = []
     total_batches = len(dataloader)
-
-    logging.info(f"Starting feature extraction on device(s): {device_ids if device_ids else device}")
 
     for batch_idx, (waveform, paths) in enumerate(dataloader):
         logging.info(f"Batch {batch_idx+1}/{total_batches}")
@@ -55,16 +56,14 @@ def extract_features(model, dataloader, device, device_ids=None):
         # Move waveform to the primary device
         waveform = waveform.to(device)
 
-        # Extract features
+        # Extract features - DataParallel will automatically distribute across GPUs
         with torch.no_grad():
-            # Access the original model
-            if isinstance(model, torch.nn.DataParallel):
-                features, _ = model.module.extract_features(waveform, padding_mask=None)
-            else:
-                features, _ = model.extract_features(waveform, padding_mask=None)
+            features, _ = model.module.extract_features(waveform, padding_mask=None) if isinstance(model, torch.nn.DataParallel) else model.extract_features(waveform, padding_mask=None)
             logging.info(f"Extracted features shape: {features.shape}")
 
-        features_list.append(features.cpu())
+        # Gather results from all GPUs
+        features = features.to('cpu')
+        features_list.append(features)
 
     final_features = torch.cat(features_list, dim=0)
     logging.info(f"Final combined features shape: {final_features.shape}")
