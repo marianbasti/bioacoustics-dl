@@ -1,10 +1,18 @@
-
 import streamlit as st
 import torch
 import plotly.express as px
 import pandas as pd
 from vis import prepare_features, reduce_dimensions
 import numpy as np
+import argparse
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Interactive BEATs Feature Visualization')
+    parser.add_argument('--data_dir', type=str, default="path/to/audio/files",
+                      help='Directory containing the audio files')
+    parser.add_argument('--checkpoint_path', type=str, default="path/to/checkpoint.pt",
+                      help='Path to the trained BEATs model checkpoint')
+    return parser.parse_args()
 
 @st.cache_data
 def load_features(data_dir, checkpoint_path, batch_size):
@@ -38,14 +46,17 @@ def create_plot(embedded, method, params_str):
     return fig
 
 def main():
+    # Parse command line arguments
+    args = parse_args()
+    
     st.set_page_config(layout="wide", page_title="BEATs Feature Visualization")
     st.title("Interactive Audio Feature Visualization")
 
     # Sidebar for input parameters
     with st.sidebar:
         st.header("Parameters")
-        data_dir = st.text_input("Data Directory", "path/to/audio/files")
-        checkpoint_path = st.text_input("Checkpoint Path", "path/to/checkpoint.pt")
+        data_dir = st.text_input("Data Directory", value=args.data_dir)
+        checkpoint_path = st.text_input("Checkpoint Path", value=args.checkpoint_path)
         batch_size = st.number_input("Batch Size", min_value=1, value=32)
         
         st.divider()
