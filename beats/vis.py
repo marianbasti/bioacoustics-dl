@@ -50,7 +50,7 @@ def extract_features(model, dataloader, device, device_ids=None):
         
         with torch.cuda.stream(torch.cuda.Stream()):  # Create dedicated CUDA stream
             for batch_idx, (waveform, paths) in enumerate(dataloader):
-                logging.info(f"Batch {batch_idx+1}/{total_batches}")
+                logging.info(f"Batch {batch_idx+1}/{total_batches} on device {device}")
                 
                 # Move data to GPU and ensure contiguous memory
                 waveform = waveform.to(device, non_blocking=True).contiguous()
@@ -79,18 +79,28 @@ def extract_features(model, dataloader, device, device_ids=None):
         total_batches = len(dataloader)
         
         for batch_idx, (waveform, paths) in enumerate(dataloader):
-            logging.info(f"Batch {batch_idx+1}/{total_batches}")
-            
             # Determine which GPU to use for this batch (round-robin)
             gpu_id = device_ids[batch_idx % len(device_ids)]
             device_i = torch.device(f'cuda:{gpu_id}')
             
+            logging.info(f"Batch {batch_idx+1}/{total_batches} on GPU {gpu_id}")
+            
             # Process on selected GPU
-            waveform = waveform.to(device_i)
+            waveform = waveform.to(device_i, non_blocking=True)
             with torch.no_grad():
                 features, _ = models[gpu_id].extract_features(waveform, padding_mask=None)
+                # Important: Move features to CPU immediately
+                features = features.cpu()
+                if len(features.shape) > 2:
+                    features = features.mean(dim=1)
+                features_list.append(features)
             
-            features_list.append(features.cpu())
+            # Log GPU memory
+            if torch.cuda.is_available():
+                logging.info(f"GPU {gpu_id} memory: {torch.cuda.memory_allocated(device_i) / 1024**2:.2f}MB")
+
+        # Concatenate all features on CPU
+        final_features = torch.cat(features_list, dim=0)
 
     logging.info(f"Final combined features shape: {final_features.shape}")
     return final_features
