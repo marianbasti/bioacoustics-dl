@@ -40,19 +40,34 @@ def load_trained_model(checkpoint_path):
 
 def extract_features(model, dataloader, device, device_ids=None):
     if not device_ids or len(device_ids) == 1:
-        # Single GPU or CPU case
+        # Single GPU case
         model = model.to(device)
         features_list = []
         total_batches = len(dataloader)
-
-        for batch_idx, (waveform, paths) in enumerate(dataloader):
-            logging.info(f"Batch {batch_idx+1}/{total_batches}")
-            waveform = waveform.to(device)
+        
+        # Pin memory in dataloader for faster transfers
+        dataloader.pin_memory = True
+        
+        with torch.cuda.stream(torch.cuda.Stream()):  # Create dedicated CUDA stream
+            for batch_idx, (waveform, paths) in enumerate(dataloader):
+                logging.info(f"Batch {batch_idx+1}/{total_batches}")
+                
+                # Move data to GPU and ensure contiguous memory
+                waveform = waveform.to(device, non_blocking=True).contiguous()
+                
+                with torch.no_grad():
+                    features, _ = model.extract_features(waveform, padding_mask=None)
+                    # Keep features on GPU
+                    features_list.append(features)
             
-            with torch.no_grad():
-                features, _ = model.extract_features(waveform, padding_mask=None)
+            # Concatenate while still on GPU
+            final_features = torch.cat(features_list, dim=0)
             
-            features_list.append(features.cpu())
+            if len(final_features.shape) > 2:
+                final_features = final_features.mean(dim=1)
+            
+            # Only move to CPU at the very end
+            final_features = final_features.cpu()
     else:
         # Multi-GPU case
         models = {}
@@ -77,12 +92,7 @@ def extract_features(model, dataloader, device, device_ids=None):
             
             features_list.append(features.cpu())
 
-    final_features = torch.cat(features_list, dim=0)
     logging.info(f"Final combined features shape: {final_features.shape}")
-
-    if len(final_features.shape) > 2:
-        final_features = final_features.mean(dim=1)
-
     return final_features
 
 def visualize_features(features, save_path, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
@@ -203,7 +213,11 @@ def main():
     # Load model (will be replicated to each GPU in extract_features)
     model = load_trained_model(args.checkpoint_path)
     dataset = AudioDataset(args.data_dir)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+    dataloader = DataLoader(dataset, 
+                          batch_size=args.batch_size, 
+                          shuffle=False,
+                          pin_memory=True,
+                          num_workers=2)
     logging.info(f"Found {len(dataset)} audio files")
 
     # Extract features using multiple GPUs
