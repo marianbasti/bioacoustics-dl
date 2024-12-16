@@ -80,18 +80,13 @@ def extract_features(model, dataloader, device, device_ids=None):
     logging.info(f"Final combined features shape: {final_features.shape}")
     return final_features
 
-def visualize_features(features, save_path, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
+def reduce_dimensions(features, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
+    """Reduce feature dimensions using t-SNE or UMAP.
+    Returns:
+        tuple: (embedded_features, params_str)
+    """
     n_samples = features.shape[0]
     
-    # Validate and adjust t-SNE parameters
-    if method == 'tsne':
-        # Ensure perplexity is valid for dataset size
-        max_perplexity = (n_samples - 1) / 3
-        if perplexity > max_perplexity:
-            logging.warning(f"Perplexity {perplexity} too large for dataset size {n_samples}. "
-                          f"Reducing to {max_perplexity}")
-            perplexity = max_perplexity
-
     # Convert features to numpy if they're torch tensors
     if isinstance(features, torch.Tensor):
         features = features.numpy()
@@ -99,11 +94,15 @@ def visualize_features(features, save_path, method='tsne', perplexity=30, n_neig
     # Standardize features
     features = (features - features.mean(0)) / features.std(0)
 
-    # Dimensionality reduction
     if method == 'tsne':
+        # Validate perplexity
+        max_perplexity = (n_samples - 1) / 3
+        if perplexity > max_perplexity:
+            logging.warning(f"Perplexity {perplexity} too large for dataset size {n_samples}. "
+                          f"Reducing to {max_perplexity}")
+            perplexity = max_perplexity
+
         try:
-            # Calculate appropriate learning rate based on data size
-            n_samples = features.shape[0]
             learning_rate = max(200, n_samples / 12)
             
             if GPU_AVAILABLE:
@@ -111,7 +110,7 @@ def visualize_features(features, save_path, method='tsne', perplexity=30, n_neig
                 reducer = cuTSNE(n_components=2, 
                                random_state=42, 
                                perplexity=perplexity,
-                               learning_rate=learning_rate,  # Use numeric value
+                               learning_rate=learning_rate,
                                init='random')
                 embedded = reducer.fit_transform(features_gpu)
                 embedded = cp.asnumpy(embedded)
@@ -119,12 +118,10 @@ def visualize_features(features, save_path, method='tsne', perplexity=30, n_neig
                 reducer = TSNE(n_components=2, 
                              random_state=42, 
                              perplexity=perplexity,
-                             learning_rate='auto',  # Keep 'auto' for sklearn
+                             learning_rate='auto',
                              init='random')
                 embedded = reducer.fit_transform(features)
             params_str = f'perplexity={perplexity}'
-            
-            logging.info(f"t-SNE completed successfully. Output shape: {embedded.shape}")
             
         except Exception as e:
             logging.error(f"Error during t-SNE: {str(e)}")
@@ -135,31 +132,35 @@ def visualize_features(features, save_path, method='tsne', perplexity=30, n_neig
             reducer = cuUMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
             embedded = reducer.fit_transform(features_gpu)
             embedded = cp.asnumpy(embedded)
-            params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
         else:
             reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
             embedded = reducer.fit_transform(features)
-            params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
+        params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
 
-    # Create visualization with improved plotting
+    return embedded, params_str
+
+def plot_embedding(embedded, save_path, method, params_str):
+    """Plot the embedded features and save to file."""
     plt.figure(figsize=(10, 10))
     scatter = plt.scatter(embedded[:, 0], embedded[:, 1], 
                          alpha=0.5, 
-                         s=50,  # Increased point size
-                         c=range(len(embedded)),  # Color by index to see distribution
+                         s=50,
+                         c=range(len(embedded)),
                          cmap='viridis')
     plt.colorbar(scatter, label='Sample index')
     plt.title(f'Audio Features Visualization\n{method.upper()}{" (GPU)" if GPU_AVAILABLE else ""}\n({params_str})')
     
-    # Add axis labels
     plt.xlabel('Dimension 1')
     plt.ylabel('Dimension 2')
-    
-    # Add grid for better readability
     plt.grid(True, alpha=0.3)
     
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
+
+def visualize_features(features, save_path, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
+    """Legacy wrapper for backward compatibility."""
+    embedded, params_str = reduce_dimensions(features, method, perplexity, n_neighbors, min_dist)
+    plot_embedding(embedded, save_path, method, params_str)
 
 def parse_grid_params(grid_json):
     """Parse grid search parameters from JSON string."""
@@ -269,11 +270,13 @@ def main():
             save_path = output_dir / f"{method}_{param_str}.png"
             
             if method == 'tsne':
-                visualize_features(features, save_path, method='tsne', perplexity=params['perplexity'])
+                embedded, params_str = reduce_dimensions(features, method='tsne', perplexity=params['perplexity'])
+                plot_embedding(embedded, save_path, method, params_str)
             else:  # umap
-                visualize_features(features, save_path, method='umap', 
-                                 n_neighbors=params['n_neighbors'], 
-                                 min_dist=params['min_dist'])
+                embedded, params_str = reduce_dimensions(features, method='umap',
+                                                      n_neighbors=params['n_neighbors'],
+                                                      min_dist=params['min_dist'])
+                plot_embedding(embedded, save_path, method, params_str)
     else:
         # Original single parameter mode
         for method in args.methods:
