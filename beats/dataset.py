@@ -17,10 +17,11 @@ class AudioDataset(Dataset):
         duration (int, optional): Target duration in seconds. Defaults to 10.
     """
     
-    def __init__(self, root_dir: Union[str, Path], sample_rate: int = 16000, duration: int = 10) -> None:
+    def __init__(self, root_dir: Union[str, Path], sample_rate: int = 16000, duration: int = 10, min_duration: float = 1.0) -> None:
         self.sample_rate = sample_rate
         self.duration = duration
         self.samples = duration * sample_rate
+        self.min_samples = int(min_duration * 16000)  # minimum 1 second at 16kHz
         
         # Get all audio files recursively
         self.files: List[Path] = []

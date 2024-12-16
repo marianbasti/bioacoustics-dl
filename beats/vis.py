@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import umap
+import torchaudio
 from pathlib import Path
 
 # Add new imports for GPU acceleration
@@ -28,11 +29,34 @@ def load_trained_model(checkpoint_path):
     model.eval()
     return model
 
+def pad_or_truncate(waveform, target_length=16000):
+    """Pad or truncate the audio to ensure minimum length."""
+    current_length = waveform.size(1)
+    
+    if current_length < target_length:
+        # Pad with zeros if shorter
+        padding = torch.zeros(1, target_length - current_length)
+        waveform = torch.cat([waveform, padding], dim=1)
+    elif current_length > target_length:
+        # Truncate if longer
+        waveform = waveform[:, :target_length]
+    
+    return waveform
+
 def extract_features(model, dataloader, device='cuda'):
     features_list = []
     
     with torch.no_grad():
         for audio in dataloader:
+            # Ensure minimum length and proper format
+            audio = pad_or_truncate(audio)
+            
+            # Resample if needed (assuming model expects 16kHz)
+            if hasattr(dataloader.dataset, 'sample_rate') and dataloader.dataset.sample_rate != 16000:
+                resampler = torchaudio.transforms.Resample(
+                    dataloader.dataset.sample_rate, 16000)
+                audio = resampler(audio)
+            
             audio = audio.to(device)
             features, _ = model.extract_features(audio, padding_mask=None)
             # Average pool temporal dimension
