@@ -81,18 +81,48 @@ def extract_features(model, dataloader, device, device_ids=None):
     return final_features
 
 def visualize_features(features, save_path, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
+    n_samples = features.shape[0]
+    
+    # Validate and adjust t-SNE parameters
+    if method == 'tsne':
+        # Ensure perplexity is valid for dataset size
+        max_perplexity = (n_samples - 1) / 3
+        if perplexity > max_perplexity:
+            logging.warning(f"Perplexity {perplexity} too large for dataset size {n_samples}. "
+                          f"Reducing to {max_perplexity}")
+            perplexity = max_perplexity
+
+    # Convert features to numpy if they're torch tensors
+    if isinstance(features, torch.Tensor):
+        features = features.numpy()
+
+    # Standardize features
+    features = (features - features.mean(0)) / features.std(0)
+
     # Dimensionality reduction
     if method == 'tsne':
-        if GPU_AVAILABLE:
-            features_gpu = cp.asarray(features)
-            reducer = cuTSNE(n_components=2, random_state=42, perplexity=perplexity)
-            embedded = reducer.fit_transform(features_gpu)
-            embedded = cp.asnumpy(embedded)
+        try:
+            if GPU_AVAILABLE:
+                features_gpu = cp.asarray(features)
+                reducer = cuTSNE(n_components=2, random_state=42, 
+                               perplexity=perplexity,
+                               learning_rate='auto',  # Add auto learning rate
+                               init='random')  # Try random initialization
+                embedded = reducer.fit_transform(features_gpu)
+                embedded = cp.asnumpy(embedded)
+            else:
+                reducer = TSNE(n_components=2, random_state=42, 
+                             perplexity=perplexity,
+                             learning_rate='auto',
+                             init='random')
+                embedded = reducer.fit_transform(features)
             params_str = f'perplexity={perplexity}'
-        else:
-            reducer = TSNE(n_components=2, random_state=42, perplexity=perplexity)
-            embedded = reducer.fit_transform(features)
-            params_str = f'perplexity={perplexity}'
+            
+            logging.info(f"t-SNE completed successfully. Output shape: {embedded.shape}")
+            
+        except Exception as e:
+            logging.error(f"Error during t-SNE: {str(e)}")
+            raise
     else:  # umap
         if GPU_AVAILABLE:
             features_gpu = cp.asarray(features)
@@ -104,12 +134,25 @@ def visualize_features(features, save_path, method='tsne', perplexity=30, n_neig
             reducer = umap.UMAP(random_state=42, n_neighbors=n_neighbors, min_dist=min_dist)
             embedded = reducer.fit_transform(features)
             params_str = f'n_neighbors={n_neighbors}, min_dist={min_dist}'
-    
-    # Create visualization
+
+    # Create visualization with improved plotting
     plt.figure(figsize=(10, 10))
-    plt.scatter(embedded[:, 0], embedded[:, 1], alpha=0.5)
+    scatter = plt.scatter(embedded[:, 0], embedded[:, 1], 
+                         alpha=0.5, 
+                         s=50,  # Increased point size
+                         c=range(len(embedded)),  # Color by index to see distribution
+                         cmap='viridis')
+    plt.colorbar(scatter, label='Sample index')
     plt.title(f'Audio Features Visualization\n{method.upper()}{" (GPU)" if GPU_AVAILABLE else ""}\n({params_str})')
-    plt.savefig(save_path)
+    
+    # Add axis labels
+    plt.xlabel('Dimension 1')
+    plt.ylabel('Dimension 2')
+    
+    # Add grid for better readability
+    plt.grid(True, alpha=0.3)
+    
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
 
 def parse_grid_params(grid_json):
