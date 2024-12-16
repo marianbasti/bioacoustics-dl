@@ -48,19 +48,27 @@ class AudioDataset(Dataset):
         waveform, sr = torchaudio.load(audio_path)
         if sr != self.sample_rate:
             waveform = torchaudio.functional.resample(waveform, sr, self.sample_rate)
-            
+        
         # Convert to mono by averaging channels if stereo
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
-            
-        # Handle duration by either trimming or padding
+        
+        # Ensure minimum length of 400 samples for ta_kaldi.fbank
+        min_samples = 400
+        if waveform.shape[1] < min_samples:
+            # Repeat the audio if too short
+            repeats = (min_samples // waveform.shape[1]) + 1
+            waveform = waveform.repeat(1, repeats)
+            waveform = waveform[:, :min_samples]
+        
+        # Handle target duration
         if waveform.shape[1] > self.samples:
-            # Randomly crop if too long
             start = torch.randint(0, waveform.shape[1] - self.samples, (1,))
             waveform = waveform[:, start:start + self.samples]
         else:
-            # Zero-pad if too short
             padding = self.samples - waveform.shape[1]
             waveform = torch.nn.functional.pad(waveform, (0, padding))
+        
+        return waveform.squeeze(0), str(audio_path)
             
         return waveform.squeeze(0), str(audio_path)
