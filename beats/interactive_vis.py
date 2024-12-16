@@ -37,18 +37,18 @@ def get_seasonal_color_value(date):
     """Convert date to seasonal value (0-1) for Southern Hemisphere"""
     # Convert date to day of year (0-365)
     day_of_year = date.timetuple().tm_yday
-    # Shift by 81 days to align with seasonal peaks (September 21 = 264 -> 0.5)
-    shifted_day = (day_of_year + 81) % 365
+    # Shift by 275 days to align with seasonal peaks (December 21 = 355 -> 0.0)
+    shifted_day = (day_of_year + 275) % 365
     return shifted_day / 365.0
 
 def create_seasonal_colorscale():
     """Create a custom colorscale for seasons in Southern Hemisphere"""
     return [
-        [0.0, 'rgb(255,69,0)'],     # red (summer - December 21)
+        [0.0, 'rgb(255,0,0)'],     # red (summer - December 21)
         [0.25, 'rgb(255,165,0)'],   # orange (autumn - April 21)
-        [0.5, 'rgb(30,144,255)'],   # blue (winter - July 21)
-        [0.75, 'rgb(34,139,34)'],   # green (spring - September 21)
-        [1.0, 'rgb(255,69,0)'],     # back to red (summer)
+        [0.5, 'rgb(0,25,255)'],   # blue (winter - July 21)
+        [0.75, 'rgb(15,255,15)'],   # green (spring - September 21)
+        [1.0, 'rgb(255,0,0)'],     # back to red (summer)
     ]
 
 def create_plot(embedded, paths, metadata, method, params_str):
