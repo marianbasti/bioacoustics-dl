@@ -150,8 +150,14 @@ def plot_embedding(embedded, save_path, method, params_str):
     plt.colorbar(scatter, label='Sample index')
     plt.title(f'Audio Features Visualization\n{method.upper()}{" (GPU)" if GPU_AVAILABLE else ""}\n({params_str})')
     
-    plt.xlabel('Dimension 1')
-    plt.ylabel('Dimension 2')
+    # More descriptive axis labels based on the dimensionality reduction method
+    if method.lower() == 'tsne':
+        plt.xlabel('t-SNE Projection Component 1')
+        plt.ylabel('t-SNE Projection Component 2')
+    else:  # umap
+        plt.xlabel('UMAP Projection Component 1')
+        plt.ylabel('UMAP Projection Component 2')
+    
     plt.grid(True, alpha=0.3)
     
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -191,6 +197,18 @@ DEFAULT_GRID = {
         "min_dist": [0.1, 0.3, 0.5]
     }
 }
+
+def prepare_features(data_dir, checkpoint_path, batch_size=32, device='cuda', device_ids=None):
+    """Helper function to prepare features for visualization"""
+    model = load_trained_model(checkpoint_path)
+    dataset = AudioDataset(data_dir)
+    dataloader = DataLoader(dataset, 
+                          batch_size=batch_size, 
+                          shuffle=False,
+                          pin_memory=True,
+                          num_workers=2)
+    logging.info(f"Found {len(dataset)} audio files")
+    return extract_features(model, dataloader, device, device_ids)
 
 def main():
     setup_logging()
