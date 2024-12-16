@@ -45,7 +45,7 @@ def extract_features(model, dataloader, device):
     for batch_idx, (waveform, paths) in enumerate(dataloader):
         # Log original waveform shape
         logging.info(f"Batch {batch_idx+1}/{total_batches}")
-        logging.info(f"Input waveform shape: {waveform.shape}")
+        logging.info(f"Input waveform shape for {paths}:{waveform.shape}")
         
         # Move waveform to device
         waveform = waveform.to(device)
