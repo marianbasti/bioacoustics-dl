@@ -8,6 +8,9 @@ from sklearn.manifold import TSNE
 import umap
 from pathlib import Path
 import logging
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 
 try:
     import cupy as cp
@@ -38,46 +41,73 @@ def load_trained_model(checkpoint_path):
     model.eval()
     return model
 
+def setup_distributed(rank, world_size):
+    """Initialize distributed training"""
+    dist.init_process_group(
+        backend='nccl',
+        init_method='tcp://localhost:12355',
+        world_size=world_size,
+        rank=rank
+    )
+
 def extract_features(model, dataloader, device, device_ids=None):
     features_list = []
     total_batches = len(dataloader)
     
     if device_ids and len(device_ids) > 1:
-        # Multi-GPU case
-        model = torch.nn.DataParallel(model, device_ids=device_ids)
+        # Initialize distributed training
+        setup_distributed(device_ids[0], len(device_ids))
+        
+        # Wrap model in DistributedDataParallel
+        model = model.to(device)
+        model = DDP(model, device_ids=[device_ids[0]])
+        
+        # Create distributed sampler
+        sampler = DistributedSampler(dataloader.dataset)
+        dataloader = DataLoader(
+            dataloader.dataset,
+            batch_size=dataloader.batch_size,
+            sampler=sampler,
+            num_workers=2,
+            pin_memory=True
+        )
+    else:
+        model = model.to(device)
     
-    # Move model to device(s) once
-    model = model.to(device)
-    
-    # Pin memory in dataloader for faster transfers
-    dataloader.pin_memory = True
-    
-    with torch.cuda.stream(torch.cuda.Stream()):  # Create dedicated CUDA stream
+    with torch.cuda.stream(torch.cuda.Stream()):
         for batch_idx, (waveform, paths) in enumerate(dataloader):
-            logging.info(f"Processing batch {batch_idx+1}/{total_batches}")
+            logging.info(f"Processing batch {batch_idx+1}/{total_batches} on GPU {device_ids[0]}")
             
-            # Move data to GPU and ensure contiguous memory
             waveform = waveform.to(device, non_blocking=True).contiguous()
             
             with torch.no_grad():
-                # Use model.module.extract_features if DataParallel, otherwise use model.extract_features
-                if isinstance(model, torch.nn.DataParallel):
-                    features, _ = model.module.extract_features(waveform, padding_mask=None)
-                else:
-                    features, _ = model.extract_features(waveform, padding_mask=None)
-                # Move features to CPU immediately to free GPU memory
+                features, _ = model.extract_features(waveform, padding_mask=None)
                 features = features.cpu()
                 if len(features.shape) > 2:
                     features = features.mean(dim=1)
                 features_list.append(features)
-            
-            # Log memory usage
-            if torch.cuda.is_available():
-                logging.info(f"GPU memory: {torch.cuda.memory_allocated(device) / 1024**2:.2f}MB")
 
-    # Concatenate all features on CPU
-    final_features = torch.cat(features_list, dim=0)
-    logging.info(f"Final combined features shape: {final_features.shape}")
+    # Gather features from all GPUs
+    if device_ids and len(device_ids) > 1:
+        # Create list of features from all GPUs
+        all_features = [None for _ in range(dist.get_world_size())]
+        features_tensor = torch.cat(features_list, dim=0)
+        dist.all_gather_object(all_features, features_tensor)
+        
+        # Only process features on rank 0
+        if dist.get_rank() == 0:
+            final_features = torch.cat(all_features, dim=0)
+        else:
+            final_features = None
+            
+        # Cleanup
+        dist.destroy_process_group()
+    else:
+        final_features = torch.cat(features_list, dim=0)
+
+    if final_features is not None:
+        logging.info(f"Final combined features shape: {final_features.shape}")
+    
     return final_features
 
 def visualize_features(features, save_path, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
@@ -187,9 +217,12 @@ def main():
     # Parse GPU devices
     if torch.cuda.is_available():
         gpu_ids = [int(x) for x in args.gpu_devices.split(',')]
-        device = torch.device(f'cuda:{gpu_ids[0]}')
+        device = torch.device(f'cuda:{gpu_ids[0]}')  # Primary GPU
         device_ids = gpu_ids
         logging.info(f"Using devices: {device_ids}")
+        
+        # Set the device for the primary GPU
+        torch.cuda.set_device(device)
     else:
         device = torch.device('cpu')
         device_ids = None
