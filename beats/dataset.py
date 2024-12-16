@@ -63,5 +63,4 @@ class AudioDataset(Dataset):
             padding = self.samples - waveform.shape[1]
             waveform = torch.nn.functional.pad(waveform, (0, padding))
             
-        # Return waveform without squeezing to maintain channel dimension
-        return waveform, str(audio_path)
+        return waveform.squeeze(0), str(audio_path)
