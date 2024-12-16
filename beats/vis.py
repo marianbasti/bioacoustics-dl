@@ -102,18 +102,24 @@ def visualize_features(features, save_path, method='tsne', perplexity=30, n_neig
     # Dimensionality reduction
     if method == 'tsne':
         try:
+            # Calculate appropriate learning rate based on data size
+            n_samples = features.shape[0]
+            learning_rate = max(200, n_samples / 12)
+            
             if GPU_AVAILABLE:
                 features_gpu = cp.asarray(features)
-                reducer = cuTSNE(n_components=2, random_state=42, 
+                reducer = cuTSNE(n_components=2, 
+                               random_state=42, 
                                perplexity=perplexity,
-                               learning_rate='auto',  # Add auto learning rate
-                               init='random')  # Try random initialization
+                               learning_rate=learning_rate,  # Use numeric value
+                               init='random')
                 embedded = reducer.fit_transform(features_gpu)
                 embedded = cp.asnumpy(embedded)
             else:
-                reducer = TSNE(n_components=2, random_state=42, 
+                reducer = TSNE(n_components=2, 
+                             random_state=42, 
                              perplexity=perplexity,
-                             learning_rate='auto',
+                             learning_rate='auto',  # Keep 'auto' for sklearn
                              init='random')
                 embedded = reducer.fit_transform(features)
             params_str = f'perplexity={perplexity}'
