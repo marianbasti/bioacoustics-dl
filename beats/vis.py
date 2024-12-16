@@ -57,7 +57,11 @@ def extract_features(model, dataloader, device, device_ids=None):
 
         # Extract features
         with torch.no_grad():
-            features, _ = model.extract_features(waveform, padding_mask=None)
+            # Access the original model
+            if isinstance(model, torch.nn.DataParallel):
+                features, _ = model.module.extract_features(waveform, padding_mask=None)
+            else:
+                features, _ = model.extract_features(waveform, padding_mask=None)
             logging.info(f"Extracted features shape: {features.shape}")
 
         features_list.append(features.cpu())
