@@ -60,7 +60,11 @@ def extract_features(model, dataloader, device, device_ids=None):
             waveform = waveform.to(device, non_blocking=True).contiguous()
             
             with torch.no_grad():
-                features, _ = model.extract_features(waveform, padding_mask=None)
+                # Use model.module.extract_features if DataParallel, otherwise use model.extract_features
+                if isinstance(model, torch.nn.DataParallel):
+                    features, _ = model.module.extract_features(waveform, padding_mask=None)
+                else:
+                    features, _ = model.extract_features(waveform, padding_mask=None)
                 # Move features to CPU immediately to free GPU memory
                 features = features.cpu()
                 if len(features.shape) > 2:
