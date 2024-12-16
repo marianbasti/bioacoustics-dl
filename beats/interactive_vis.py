@@ -5,6 +5,9 @@ import pandas as pd
 from vis import prepare_features, reduce_dimensions
 import numpy as np
 import argparse
+import re
+from datetime import datetime
+import colorsys
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Interactive BEATs Feature Visualization')
@@ -23,21 +26,50 @@ def load_features(data_dir, checkpoint_path, batch_size):
         features = features.numpy()
     return features, paths, metadata
 
+def extract_date(filename):
+    """Extract date from filename using regex"""
+    match = re.search(r'(\d{8})', filename)
+    if match:
+        return datetime.strptime(match.group(1), '%Y%m%d')
+    return None
+
+def get_seasonal_color_value(date):
+    """Convert date to seasonal value (0-1) for Southern Hemisphere"""
+    # Convert date to day of year (0-365)
+    day_of_year = date.timetuple().tm_yday
+    # Shift by 81 days to align with seasonal peaks (September 21 = 264 -> 0.5)
+    shifted_day = (day_of_year + 81) % 365
+    return shifted_day / 365.0
+
+def create_seasonal_colorscale():
+    """Create a custom colorscale for seasons in Southern Hemisphere"""
+    return [
+        [0.0, 'rgb(255,69,0)'],     # red (summer - December 21)
+        [0.25, 'rgb(255,165,0)'],   # orange (autumn - April 21)
+        [0.5, 'rgb(30,144,255)'],   # blue (winter - July 21)
+        [0.75, 'rgb(34,139,34)'],   # green (spring - September 21)
+        [1.0, 'rgb(255,69,0)'],     # back to red (summer)
+    ]
+
 def create_plot(embedded, paths, metadata, method, params_str):
     """Create an interactive scatter plot using plotly"""
     df = pd.DataFrame({
         f'{method}_1': embedded[:, 0],
         f'{method}_2': embedded[:, 1],
-        'index': np.arange(len(embedded))
     })
     
-    # Add metadata columns
+    # Add metadata columns and extract dates
     for key in metadata[0].keys():
         df[key] = [m[key] for m in metadata]
+    
+    # Extract dates and seasonal values
+    df['date'] = [extract_date(path) for path in paths]
+    df['seasonal_value'] = df['date'].apply(get_seasonal_color_value)
     
     # Customize hover template
     hover_template = (
         "<b>%{customdata[0]}</b><br>"
+        "Date: %{customdata[4]}<br>"
         "Sample Rate: %{customdata[1]} Hz<br>"
         "Duration: %{customdata[2]}<br>"
         "Channels: %{customdata[3]}"
@@ -48,9 +80,10 @@ def create_plot(embedded, paths, metadata, method, params_str):
         x=f'{method}_1',
         y=f'{method}_2',
         title=f'{method.upper()} Visualization ({params_str})',
-        color='index',
-        color_continuous_scale='viridis',
-        custom_data=['filename', 'sample_rate', 'duration', 'num_channels']
+        color='seasonal_value',
+        color_continuous_scale=create_seasonal_colorscale(),
+        custom_data=['filename', 'sample_rate', 'duration', 'num_channels', 
+                    df['date'].dt.strftime('%Y-%m-%d')]
     )
     
     fig.update_traces(
@@ -61,7 +94,7 @@ def create_plot(embedded, paths, metadata, method, params_str):
     fig.update_layout(
         width=600,
         height=600,
-        coloraxis_colorbar_title='Sample Index'
+        coloraxis_colorbar_title='Season'
     )
     
     return fig
