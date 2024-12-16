@@ -1,3 +1,5 @@
+import os
+import torch.multiprocessing as mp
 import matplotlib
 matplotlib.use('Agg')  # Add this line before importing pyplot
 
@@ -42,14 +44,45 @@ def load_trained_model(checkpoint_path):
     return model
 
 def setup_distributed(rank, world_size):
-    """Initialize distributed training"""
-    logging.info(f"Setting up distributed training with {world_size} GPUs")
+    """Initialize distributed training with proper environment variables"""
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    
+    # Initialize the process group
     dist.init_process_group(
         backend='nccl',
-        init_method='tcp://localhost:12355',
+        init_method='env://',
         world_size=world_size,
         rank=rank
     )
+    
+    logging.info(f"Initialized process group for rank {rank}/{world_size-1}")
+
+def cleanup():
+    dist.destroy_process_group()
+
+def run_extraction(rank, world_size, model, dataset, device, batch_size):
+    setup_distributed(rank, world_size)
+    torch.cuda.set_device(rank)
+    
+    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        num_workers=2,
+        pin_memory=True
+    )
+    
+    # Rest of feature extraction logic here
+    features_list = []
+    model = model.to(rank)
+    model = DDP(model, device_ids=[rank])
+    
+    # ...rest of feature extraction...
+    
+    cleanup()
+    return features
 
 def extract_features(model, dataloader, device, device_ids=None):
     features_list = []
@@ -241,7 +274,22 @@ def main():
     logging.info(f"Found {len(dataset)} audio files")
 
     # Extract features using multiple GPUs
-    features = extract_features(model, dataloader, device, device_ids)
+    if torch.cuda.is_available() and len(device_ids) > 1:
+        # Multi-GPU case
+        world_size = len(device_ids)
+        model = load_trained_model(args.checkpoint_path)
+        dataset = AudioDataset(args.data_dir)
+        
+        # Spawn processes for each GPU
+        mp.spawn(
+            run_extraction,
+            args=(world_size, model, dataset, device, args.batch_size),
+            nprocs=world_size,
+            join=True
+        )
+    else:
+        # Single GPU or CPU case
+        features = extract_features(model, dataloader, device, device_ids)
     
     # Create visualizations
     output_dir = Path(args.output_dir)
@@ -274,4 +322,6 @@ def main():
             )
 
 if __name__ == "__main__":
+    # Required for multiprocessing
+    mp.set_start_method('spawn')
     main()
