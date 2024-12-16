@@ -43,23 +43,16 @@ def extract_features(model, dataloader, device):
     logging.info(f"Starting feature extraction on {device}")
     
     for batch_idx, (waveform, paths) in enumerate(dataloader):
-        # Log original waveform shape
+        # Log progress
         logging.info(f"Batch {batch_idx+1}/{total_batches}")
-        logging.info(f"Input waveform shape for {paths}:{waveform.shape}")
+        logging.info(f"Input waveform shape: {waveform.shape}")
         
         # Move waveform to device
         waveform = waveform.to(device)
         
-        # Add channel dimension if necessary
-        if waveform.dim() == 2:
-            waveform = waveform.unsqueeze(1)
-            logging.info(f"Added channel dimension. New shape: {waveform.shape}")
-        
-        # Handle short waveforms
-        if waveform.shape[-1] < 400:
-            padding = 400 - waveform.shape[-1]
-            waveform = torch.nn.functional.pad(waveform, (0, padding))
-            logging.info(f"Padded short waveform to length 400. New shape: {waveform.shape}")
+        # Ensure waveform is in the correct shape [batch, time]
+        # AudioDataset returns [batch, time], but BEATs expects [batch, time]
+        # so no reshaping needed here
         
         # Extract features
         with torch.no_grad():
