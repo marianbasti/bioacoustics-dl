@@ -40,6 +40,7 @@ def load_trained_model(checkpoint_path):
 
 def extract_features(model, dataloader, device, device_ids=None):
     features_list = []
+    paths_list = []  # New list to store paths
     total_batches = len(dataloader)
     
     if device_ids and len(device_ids) > 1:
@@ -70,6 +71,7 @@ def extract_features(model, dataloader, device, device_ids=None):
                 if len(features.shape) > 2:
                     features = features.mean(dim=1)
                 features_list.append(features)
+                paths_list.extend(paths)  # Store paths for this batch
             
             # Log memory usage
             if torch.cuda.is_available():
@@ -78,7 +80,7 @@ def extract_features(model, dataloader, device, device_ids=None):
     # Concatenate all features on CPU
     final_features = torch.cat(features_list, dim=0)
     logging.info(f"Final combined features shape: {final_features.shape}")
-    return final_features
+    return final_features, paths_list  # Return both features and paths
 
 def reduce_dimensions(features, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
     """Reduce feature dimensions using t-SNE or UMAP.
@@ -139,7 +141,7 @@ def reduce_dimensions(features, method='tsne', perplexity=30, n_neighbors=15, mi
 
     return embedded, params_str
 
-def plot_embedding(embedded, save_path, method, params_str):
+def plot_embedding(embedded, paths, save_path, method, params_str):
     """Plot the embedded features and save to file."""
     plt.figure(figsize=(10, 10))
     scatter = plt.scatter(embedded[:, 0], embedded[:, 1], 
@@ -147,6 +149,29 @@ def plot_embedding(embedded, save_path, method, params_str):
                          s=50,
                          c=range(len(embedded)),
                          cmap='viridis')
+    
+    # Add tooltip functionality
+    annot = plt.annotate("", xy=(0,0), xytext=(20,20), textcoords="offset points",
+                        bbox=dict(boxstyle="round", fc="w"),
+                        arrowprops=dict(arrowstyle="->"))
+    annot.set_visible(False)
+
+    def hover(event):
+        if event.inaxes == plt.gca():
+            cont, ind = scatter.contains(event)
+            if cont:
+                pos = scatter.get_offsets()[ind["ind"][0]]
+                annot.xy = pos
+                text = paths[ind["ind"][0]]
+                annot.set_text(text)
+                annot.set_visible(True)
+                plt.draw()
+            else:
+                annot.set_visible(False)
+                plt.draw()
+
+    plt.gcf().canvas.mpl_connect("motion_notify_event", hover)
+    
     plt.colorbar(scatter, label='Sample index')
     plt.title(f'Audio Features Visualization\n{method.upper()}{" (GPU)" if GPU_AVAILABLE else ""}\n({params_str})')
     
@@ -208,7 +233,8 @@ def prepare_features(data_dir, checkpoint_path, batch_size=32, device='cuda', de
                           pin_memory=True,
                           num_workers=2)
     logging.info(f"Found {len(dataset)} audio files")
-    return extract_features(model, dataloader, device, device_ids)
+    features, paths = extract_features(model, dataloader, device, device_ids)
+    return features, paths
 
 def main():
     setup_logging()
@@ -274,7 +300,7 @@ def main():
     logging.info(f"Found {len(dataset)} audio files")
 
     # Extract features using multiple GPUs
-    features = extract_features(model, dataloader, device, device_ids)
+    features, paths = extract_features(model, dataloader, device, device_ids)
     
     # Create visualizations
     output_dir = Path(args.output_dir)
@@ -289,12 +315,12 @@ def main():
             
             if method == 'tsne':
                 embedded, params_str = reduce_dimensions(features, method='tsne', perplexity=params['perplexity'])
-                plot_embedding(embedded, save_path, method, params_str)
+                plot_embedding(embedded, paths, save_path, method, params_str)
             else:  # umap
                 embedded, params_str = reduce_dimensions(features, method='umap',
                                                       n_neighbors=params['n_neighbors'],
                                                       min_dist=params['min_dist'])
-                plot_embedding(embedded, save_path, method, params_str)
+                plot_embedding(embedded, paths, save_path, method, params_str)
     else:
         # Original single parameter mode
         for method in args.methods:

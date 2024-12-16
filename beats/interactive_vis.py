@@ -18,23 +18,28 @@ def parse_args():
 def load_features(data_dir, checkpoint_path, batch_size):
     """Cache the feature extraction to avoid recomputing"""
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    features = prepare_features(data_dir, checkpoint_path, batch_size, device)
-    return features.numpy() if isinstance(features, torch.Tensor) else features
+    features, paths = prepare_features(data_dir, checkpoint_path, batch_size, device)
+    if isinstance(features, torch.Tensor):
+        features = features.numpy()
+    return features, paths
 
-def create_plot(embedded, method, params_str):
+def create_plot(embedded, paths, method, params_str):
     """Create an interactive scatter plot using plotly"""
-    df = pd.DataFrame(
-        embedded,
-        columns=[f'{method}_1', f'{method}_2']
-    )
+    df = pd.DataFrame({
+        f'{method}_1': embedded[:, 0],
+        f'{method}_2': embedded[:, 1],
+        'filename': paths,
+        'index': np.arange(len(embedded))
+    })
     
     fig = px.scatter(
         df,
         x=f'{method}_1',
         y=f'{method}_2',
         title=f'{method.upper()} Visualization ({params_str})',
-        color=np.arange(len(df)),
-        color_continuous_scale='viridis'
+        color='index',
+        color_continuous_scale='viridis',
+        hover_data=['filename']  # Show filename on hover
     )
     
     fig.update_layout(
@@ -70,7 +75,7 @@ def main():
 
     # Load features (cached)
     try:
-        features = load_features(data_dir, checkpoint_path, batch_size)
+        features, paths = load_features(data_dir, checkpoint_path, batch_size)
     except Exception as e:
         st.error(f"Error loading features: {str(e)}")
         return
@@ -86,7 +91,7 @@ def main():
                 method='tsne',
                 perplexity=perplexity
             )
-            fig_tsne = create_plot(tsne_embedded, 't-SNE', tsne_params)
+            fig_tsne = create_plot(tsne_embedded, paths, 't-SNE', tsne_params)
             st.plotly_chart(fig_tsne)
         except Exception as e:
             st.error(f"Error in t-SNE: {str(e)}")
@@ -100,7 +105,7 @@ def main():
                 n_neighbors=n_neighbors,
                 min_dist=min_dist
             )
-            fig_umap = create_plot(umap_embedded, 'UMAP', umap_params)
+            fig_umap = create_plot(umap_embedded, paths, 'UMAP', umap_params)
             st.plotly_chart(fig_umap)
         except Exception as e:
             st.error(f"Error in UMAP: {str(e)}")
