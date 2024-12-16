@@ -70,5 +70,3 @@ class AudioDataset(Dataset):
             waveform = torch.nn.functional.pad(waveform, (0, padding))
         
         return waveform.squeeze(0), str(audio_path)
-            
-        return waveform.squeeze(0), str(audio_path)
