@@ -5,7 +5,6 @@ from sklearn.manifold import TSNE
 import umap
 from pathlib import Path
 
-# Add new imports for GPU acceleration
 try:
     import cupy as cp
     from cuml.manifold import TSNE as cuTSNE
@@ -20,6 +19,13 @@ from dataset import AudioDataset
 import argparse
 import json
 
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
 def load_trained_model(checkpoint_path):
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     cfg = BEATsConfig(checkpoint['cfg'])
@@ -31,23 +37,39 @@ def load_trained_model(checkpoint_path):
 def extract_features(model, dataloader, device):
     model.to(device)
     features_list = []
-    for waveform, _ in dataloader:
-        # Move waveform to the correct device
-        waveform = waveform.to(device)  # Shape: [batch_size, samples]
-
+    total_batches = len(dataloader)
+    
+    logging.info(f"Starting feature extraction on {device}")
+    
+    for batch_idx, (waveform, paths) in enumerate(dataloader):
+        # Log original waveform shape
+        logging.info(f"Batch {batch_idx+1}/{total_batches}")
+        logging.info(f"Input waveform shape: {waveform.shape}")
+        
+        # Move waveform to device
+        waveform = waveform.to(device)
+        
         # Add channel dimension if necessary
         if waveform.dim() == 2:
-            waveform = waveform.unsqueeze(1)  # Shape: [batch_size, 1, samples]
-
-        # Ensure waveform length is at least 400 samples
+            waveform = waveform.unsqueeze(1)
+            logging.info(f"Added channel dimension. New shape: {waveform.shape}")
+        
+        # Handle short waveforms
         if waveform.shape[-1] < 400:
             padding = 400 - waveform.shape[-1]
             waveform = torch.nn.functional.pad(waveform, (0, padding))
-
+            logging.info(f"Padded short waveform to length 400. New shape: {waveform.shape}")
+        
+        # Extract features
         with torch.no_grad():
             features, _ = model.extract_features(waveform, padding_mask=None)
+            logging.info(f"Extracted features shape: {features.shape}")
+        
         features_list.append(features.cpu())
-    return torch.cat(features_list, dim=0)
+    
+    final_features = torch.cat(features_list, dim=0)
+    logging.info(f"Final combined features shape: {final_features.shape}")
+    return final_features
 
 def visualize_features(features, save_path, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
     # Dimensionality reduction
@@ -112,6 +134,7 @@ DEFAULT_GRID = {
 }
 
 def main():
+    setup_logging()
     parser = argparse.ArgumentParser(description='Visualize audio features using BEATs model')
     # Data and model parameters
     parser.add_argument('--data_dir', type=str, required=True,
@@ -153,7 +176,8 @@ def main():
     model = load_trained_model(args.checkpoint_path).to(device)
     dataset = AudioDataset(args.data_dir)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
-    
+    logging.info(f"Found {len(dataset)} audio files")
+
     # Extract features
     features = extract_features(model, dataloader, device)
     
