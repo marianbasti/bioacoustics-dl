@@ -17,6 +17,73 @@ def parse_args():
                       help='Path to the trained BEATs model checkpoint')
     return parser.parse_args()
 
+def analyze_features(features):
+    """Perform statistical analysis of features"""
+    # PCA Analysis
+    pca = PCA()
+    scaled_features = StandardScaler().fit_transform(features)
+    pca_result = pca.fit_transform(scaled_features)
+    
+    # Explained variance
+    exp_var_ratio = pca.explained_variance_ratio_
+    cum_sum_eigenvalues = np.cumsum(exp_var_ratio)
+    
+    return pca_result, exp_var_ratio, cum_sum_eigenvalues
+
+def create_feature_analysis_tab(features, paths, metadata):
+    """Create additional analysis visualizations"""
+    st.header("Feature Analysis")
+    
+    # Create tabs for different analyses
+    tab1, tab2, tab3 = st.tabs(["Clustering", "PCA Analysis", "Temporal Patterns"])
+    
+    with tab1:
+        # K-means clustering
+        n_clusters = st.slider("Number of Clusters", 2, 10, 4)
+        kmeans = KMeans(n_clusters=n_clusters)
+        clusters = kmeans.fit_predict(features)
+        
+        # Plot with clusters
+        df_clusters = pd.DataFrame({
+            'PC1': pca_result[:, 0],
+            'PC2': pca_result[:, 1],
+            'Cluster': clusters
+        })
+        
+        fig_clusters = px.scatter(df_clusters, x='PC1', y='PC2', 
+                                color='Cluster', title='Feature Clusters')
+        st.plotly_chart(fig_clusters)
+    
+    with tab2:
+        # PCA Analysis
+        pca_result, exp_var_ratio, cum_sum = analyze_features(features)
+        
+        # Scree plot
+        fig_pca = go.Figure(data=[
+            go.Bar(name='Individual', x=range(1, len(exp_var_ratio) + 1), 
+                  y=exp_var_ratio),
+            go.Scatter(name='Cumulative', x=range(1, len(cum_sum) + 1), 
+                      y=cum_sum, yaxis='y2')
+        ])
+        
+        fig_pca.update_layout(
+            title='PCA Explained Variance',
+            yaxis=dict(title='Explained Variance Ratio'),
+            yaxis2=dict(title='Cumulative Explained Variance',
+                       overlaying='y', side='right')
+        )
+        st.plotly_chart(fig_pca)
+        
+    with tab3:
+        # Temporal patterns
+        dates = [extract_date(p) for p in paths]
+        months = [d.month for d in dates if d]
+        
+        fig_temporal = px.histogram(x=months, nbins=12,
+                                  title='Monthly Distribution',
+                                  labels={'x': 'Month', 'y': 'Count'})
+        st.plotly_chart(fig_temporal)
+
 @st.cache_data
 def load_features(data_dir, checkpoint_path, batch_size):
     """Cache the feature extraction to avoid recomputing"""
@@ -102,7 +169,7 @@ def main():
     args = parse_args()
     
     st.set_page_config(layout="wide", page_title="BEATs Feature Visualization")
-    st.title("Interactive Audio Feature Visualization")
+    st.title("Interactive BEATs Feature Visualization")
 
     # Sidebar for input parameters
     with st.sidebar:
@@ -156,6 +223,9 @@ def main():
             st.plotly_chart(fig_umap)
         except Exception as e:
             st.error(f"Error in UMAP: {str(e)}")
+
+    st.divider()
+    create_feature_analysis_tab(features, paths, metadata)
 
 if __name__ == "__main__":
     main()
