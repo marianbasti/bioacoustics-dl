@@ -1,5 +1,3 @@
-import os
-import torch.multiprocessing as mp
 import matplotlib
 matplotlib.use('Agg')  # Add this line before importing pyplot
 
@@ -10,9 +8,6 @@ from sklearn.manifold import TSNE
 import umap
 from pathlib import Path
 import logging
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data.distributed import DistributedSampler
 
 try:
     import cupy as cp
@@ -43,106 +38,46 @@ def load_trained_model(checkpoint_path):
     model.eval()
     return model
 
-def setup_distributed(rank, world_size):
-    """Initialize distributed training with proper environment variables"""
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    
-    # Initialize the process group
-    dist.init_process_group(
-        backend='nccl',
-        init_method='env://',
-        world_size=world_size,
-        rank=rank
-    )
-    
-    logging.info(f"Initialized process group for rank {rank}/{world_size-1}")
-
-def cleanup():
-    dist.destroy_process_group()
-
-def run_extraction(rank, world_size, model, dataset, device, batch_size):
-    setup_distributed(rank, world_size)
-    torch.cuda.set_device(rank)
-    
-    sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank)
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        sampler=sampler,
-        num_workers=2,
-        pin_memory=True
-    )
-    
-    # Rest of feature extraction logic here
-    features_list = []
-    model = model.to(rank)
-    model = DDP(model, device_ids=[rank])
-    
-    # ...rest of feature extraction...
-    
-    cleanup()
-    return features
-
 def extract_features(model, dataloader, device, device_ids=None):
     features_list = []
     total_batches = len(dataloader)
     
     if device_ids and len(device_ids) > 1:
-        # Initialize distributed training
-        logging.info(f"Setting up distributed training with {len(device_ids)} GPUs")
-        setup_distributed(device_ids[0], len(device_ids))
-        logging.info(f"Wrapping model in DistributedDataParallel with device {device_ids[0]}")
-        # Wrap model in DistributedDataParallel
-        model = model.to(device)
-        model = DDP(model, device_ids=[device_ids[0]])
-        logging.info(f"Created DistributedDataParallel model on GPU {device_ids[0]}")
-        # Create distributed sampler
-        sampler = DistributedSampler(dataloader.dataset)
-        dataloader = DataLoader(
-            dataloader.dataset,
-            batch_size=dataloader.batch_size,
-            sampler=sampler,
-            num_workers=2,
-            pin_memory=True
-        )
-    else:
-        model = model.to(device)
+        # Multi-GPU case
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
     
-    with torch.cuda.stream(torch.cuda.Stream()):
+    # Move model to device(s) once
+    model = model.to(device)
+    
+    # Pin memory in dataloader for faster transfers
+    dataloader.pin_memory = True
+    
+    with torch.cuda.stream(torch.cuda.Stream()):  # Create dedicated CUDA stream
         for batch_idx, (waveform, paths) in enumerate(dataloader):
-            logging.info(f"Processing batch {batch_idx+1}/{total_batches} on GPU {device_ids[0]}")
+            logging.info(f"Processing batch {batch_idx+1}/{total_batches}")
             
+            # Move data to GPU and ensure contiguous memory
             waveform = waveform.to(device, non_blocking=True).contiguous()
             
             with torch.no_grad():
-                features, _ = model.extract_features(waveform, padding_mask=None)
+                # Use model.module.extract_features if DataParallel, otherwise use model.extract_features
+                if isinstance(model, torch.nn.DataParallel):
+                    features, _ = model.module.extract_features(waveform, padding_mask=None)
+                else:
+                    features, _ = model.extract_features(waveform, padding_mask=None)
+                # Move features to CPU immediately to free GPU memory
                 features = features.cpu()
                 if len(features.shape) > 2:
                     features = features.mean(dim=1)
                 features_list.append(features)
-
-    # Gather features from all GPUs
-    if device_ids and len(device_ids) > 1:
-        # Create list of features from all GPUs
-        all_features = [None for _ in range(dist.get_world_size())]
-        features_tensor = torch.cat(features_list, dim=0)
-        dist.all_gather_object(all_features, features_tensor)
-        
-        # Only process features on rank 0
-        if dist.get_rank() == 0:
-            final_features = torch.cat(all_features, dim=0)
-        else:
-            final_features = None
             
-        # Cleanup
-        dist.destroy_process_group()
-    else:
-        final_features = torch.cat(features_list, dim=0)
+            # Log memory usage
+            if torch.cuda.is_available():
+                logging.info(f"GPU memory: {torch.cuda.memory_allocated(device) / 1024**2:.2f}MB")
 
-    if final_features is not None:
-        logging.info(f"Final combined features shape: {final_features.shape}")
-    
+    # Concatenate all features on CPU
+    final_features = torch.cat(features_list, dim=0)
+    logging.info(f"Final combined features shape: {final_features.shape}")
     return final_features
 
 def visualize_features(features, save_path, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
@@ -252,12 +187,9 @@ def main():
     # Parse GPU devices
     if torch.cuda.is_available():
         gpu_ids = [int(x) for x in args.gpu_devices.split(',')]
-        device = torch.device(f'cuda:{gpu_ids[0]}')  # Primary GPU
+        device = torch.device(f'cuda:{gpu_ids[0]}')
         device_ids = gpu_ids
         logging.info(f"Using devices: {device_ids}")
-        
-        # Set the device for the primary GPU
-        torch.cuda.set_device(device)
     else:
         device = torch.device('cpu')
         device_ids = None
@@ -274,22 +206,7 @@ def main():
     logging.info(f"Found {len(dataset)} audio files")
 
     # Extract features using multiple GPUs
-    if torch.cuda.is_available() and len(device_ids) > 1:
-        # Multi-GPU case
-        world_size = len(device_ids)
-        model = load_trained_model(args.checkpoint_path)
-        dataset = AudioDataset(args.data_dir)
-        
-        # Spawn processes for each GPU
-        mp.spawn(
-            run_extraction,
-            args=(world_size, model, dataset, device, args.batch_size),
-            nprocs=world_size,
-            join=True
-        )
-    else:
-        # Single GPU or CPU case
-        features = extract_features(model, dataloader, device, device_ids)
+    features = extract_features(model, dataloader, device, device_ids)
     
     # Create visualizations
     output_dir = Path(args.output_dir)
@@ -322,6 +239,4 @@ def main():
             )
 
 if __name__ == "__main__":
-    # Required for multiprocessing
-    mp.set_start_method('spawn')
     main()
