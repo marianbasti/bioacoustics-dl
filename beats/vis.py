@@ -45,6 +45,7 @@ def extract_features(model, dataloader, devices):
     # Create model replicas for each GPU
     models = {device: model.to(device) for device in devices}
     features_list = []
+    paths_list = []  # Store paths for debugging
     total_batches = len(dataloader)
     
     logging.info(f"Starting feature extraction on devices: {devices}")
@@ -54,22 +55,26 @@ def extract_features(model, dataloader, devices):
         device = devices[batch_idx % len(devices)]
         current_model = models[device]
         
-        # Log progress
+        # Log progress and device info
         logging.info(f"Batch {batch_idx+1}/{total_batches} on {device}")
         logging.info(f"Input waveform shape: {waveform.shape}")
         
         # Move waveform to current device
         waveform = waveform.to(device)
         
-        # Extract features
+        # Extract features and immediately move to CPU
         with torch.no_grad():
             features, _ = current_model.extract_features(waveform, padding_mask=None)
+            features = features.cpu()  # Move to CPU immediately
             logging.info(f"Extracted features shape: {features.shape}")
         
-        features_list.append(features.cpu())
+        features_list.append(features)
+        paths_list.extend(paths)  # Store paths for debugging
     
+    # All features are now on CPU, safe to concatenate
     final_features = torch.cat(features_list, dim=0)
     logging.info(f"Final combined features shape: {final_features.shape}")
+    logging.info(f"Total files processed: {len(paths_list)}")
 
     if len(final_features.shape) > 2:
         final_features = final_features.mean(dim=1)
