@@ -35,28 +35,32 @@ def load_trained_model(checkpoint_path):
     model.eval()
     return model
 
-def extract_features(model, dataloader, device):
-    model.to(device)
+def extract_features(model, dataloader, devices):
+    if not isinstance(devices, list):
+        devices = [devices]
+    
+    # Create model replicas for each GPU
+    models = {device: model.to(device) for device in devices}
     features_list = []
     total_batches = len(dataloader)
     
-    logging.info(f"Starting feature extraction on {device}")
+    logging.info(f"Starting feature extraction on devices: {devices}")
     
     for batch_idx, (waveform, paths) in enumerate(dataloader):
+        # Distribute batches across GPUs in round-robin fashion
+        device = devices[batch_idx % len(devices)]
+        current_model = models[device]
+        
         # Log progress
-        logging.info(f"Batch {batch_idx+1}/{total_batches}")
+        logging.info(f"Batch {batch_idx+1}/{total_batches} on {device}")
         logging.info(f"Input waveform shape: {waveform.shape}")
         
-        # Move waveform to device
+        # Move waveform to current device
         waveform = waveform.to(device)
-        
-        # Ensure waveform is in the correct shape [batch, time]
-        # AudioDataset returns [batch, time], but BEATs expects [batch, time]
-        # so no reshaping needed here
         
         # Extract features
         with torch.no_grad():
-            features, _ = model.extract_features(waveform, padding_mask=None)
+            features, _ = current_model.extract_features(waveform, padding_mask=None)
             logging.info(f"Extracted features shape: {features.shape}")
         
         features_list.append(features.cpu())
@@ -65,7 +69,6 @@ def extract_features(model, dataloader, device):
     logging.info(f"Final combined features shape: {final_features.shape}")
 
     if len(final_features.shape) > 2:
-        # Average across temporal dimension if present (assuming shape is [batch, time, features])
         final_features = final_features.mean(dim=1)
 
     return final_features
@@ -168,17 +171,25 @@ def main():
                            '\'{"tsne": {"perplexity": [10, 30, 50]}, '
                            '"umap": {"n_neighbors": [5, 15, 30], "min_dist": [0.1, 0.5]}}\'')
     
-    args = parser.parse_args()
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Add GPU devices parameter
+    parser.add_argument('--gpu_devices', type=str, default='0',
+                      help='Comma-separated list of GPU devices to use (e.g., "0,1,2,3"). Default: "0"')
     
-    # Load model and data
-    model = load_trained_model(args.checkpoint_path).to(device)
+    args = parser.parse_args()
+    
+    # Parse GPU devices
+    gpu_ids = [int(x) for x in args.gpu_devices.split(',')]
+    devices = [torch.device(f'cuda:{i}') if torch.cuda.is_available() else torch.device('cpu') for i in gpu_ids]
+    logging.info(f"Using devices: {devices}")
+    
+    # Load model (will be replicated to each GPU in extract_features)
+    model = load_trained_model(args.checkpoint_path)
     dataset = AudioDataset(args.data_dir)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     logging.info(f"Found {len(dataset)} audio files")
 
-    # Extract features
-    features = extract_features(model, dataloader, device)
+    # Extract features using multiple GPUs
+    features = extract_features(model, dataloader, devices)
     
     # Create visualizations
     output_dir = Path(args.output_dir)
