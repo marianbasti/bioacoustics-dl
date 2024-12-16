@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import umap
 from pathlib import Path
+import logging
 
 try:
     import cupy as cp
