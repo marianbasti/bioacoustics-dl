@@ -38,43 +38,32 @@ def load_trained_model(checkpoint_path):
     model.eval()
     return model
 
-def extract_features(model, dataloader, devices):
-    if not isinstance(devices, list):
-        devices = [devices]
+def extract_features(model, dataloader, device, device_ids=None):
+    model = model.to(device)
+    if device_ids and len(device_ids) > 1:
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
     
-    # Create model replicas for each GPU
-    models = {device: model.to(device) for device in devices}
     features_list = []
-    paths_list = []  # Store paths for debugging
     total_batches = len(dataloader)
-    
-    logging.info(f"Starting feature extraction on devices: {devices}")
-    
+
+    logging.info(f"Starting feature extraction on device(s): {device_ids if device_ids else device}")
+
     for batch_idx, (waveform, paths) in enumerate(dataloader):
-        # Distribute batches across GPUs in round-robin fashion
-        device = devices[batch_idx % len(devices)]
-        current_model = models[device]
-        
-        # Log progress and device info
-        logging.info(f"Batch {batch_idx+1}/{total_batches} on {device}")
+        logging.info(f"Batch {batch_idx+1}/{total_batches}")
         logging.info(f"Input waveform shape: {waveform.shape}")
-        
-        # Move waveform to current device
+
+        # Move waveform to the primary device
         waveform = waveform.to(device)
-        
-        # Extract features and immediately move to CPU
+
+        # Extract features
         with torch.no_grad():
-            features, _ = current_model.extract_features(waveform, padding_mask=None)
-            features = features.cpu()  # Move to CPU immediately
+            features, _ = model.extract_features(waveform, padding_mask=None)
             logging.info(f"Extracted features shape: {features.shape}")
-        
-        features_list.append(features)
-        paths_list.extend(paths)  # Store paths for debugging
-    
-    # All features are now on CPU, safe to concatenate
+
+        features_list.append(features.cpu())
+
     final_features = torch.cat(features_list, dim=0)
     logging.info(f"Final combined features shape: {final_features.shape}")
-    logging.info(f"Total files processed: {len(paths_list)}")
 
     if len(final_features.shape) > 2:
         final_features = final_features.mean(dim=1)
@@ -186,9 +175,15 @@ def main():
     args = parser.parse_args()
     
     # Parse GPU devices
-    gpu_ids = [int(x) for x in args.gpu_devices.split(',')]
-    devices = [torch.device(f'cuda:{i}') if torch.cuda.is_available() else torch.device('cpu') for i in gpu_ids]
-    logging.info(f"Using devices: {devices}")
+    if torch.cuda.is_available():
+        gpu_ids = [int(x) for x in args.gpu_devices.split(',')]
+        device = torch.device(f'cuda:{gpu_ids[0]}')
+        device_ids = gpu_ids
+        logging.info(f"Using devices: {device_ids}")
+    else:
+        device = torch.device('cpu')
+        device_ids = None
+        logging.info("Using CPU")
     
     # Load model (will be replicated to each GPU in extract_features)
     model = load_trained_model(args.checkpoint_path)
@@ -197,7 +192,7 @@ def main():
     logging.info(f"Found {len(dataset)} audio files")
 
     # Extract features using multiple GPUs
-    features = extract_features(model, dataloader, devices)
+    features = extract_features(model, dataloader, device, device_ids)
     
     # Create visualizations
     output_dir = Path(args.output_dir)
