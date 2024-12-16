@@ -63,6 +63,11 @@ def extract_features(model, dataloader, device):
     
     final_features = torch.cat(features_list, dim=0)
     logging.info(f"Final combined features shape: {final_features.shape}")
+
+    if len(final_features.shape) > 2:
+        # Average across temporal dimension if present (assuming shape is [batch, time, features])
+        final_features = final_features.mean(dim=1)
+
     return final_features
 
 def visualize_features(features, save_path, method='tsne', perplexity=30, n_neighbors=15, min_dist=0.1):
