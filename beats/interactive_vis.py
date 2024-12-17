@@ -14,6 +14,16 @@ from sklearn.preprocessing import StandardScaler
 from dataset import AudioDataset
 from vis import extract_features, load_trained_model
 from torch.utils.data import DataLoader
+import logging
+import time
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 if torch.cuda.is_available():
     device = 'cuda'
@@ -122,6 +132,9 @@ def create_feature_analysis_tab(features, paths, metadata):
 @st.cache_data
 def load_features(data_dir, checkpoint_path, batch_size, sample_percent=100.0):
     """Cache the feature extraction to avoid recomputing"""
+    logger.info(f"Loading features from {data_dir} with {sample_percent}% sample size")
+    start_time = time.time()
+    
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # Create dataset
@@ -152,6 +165,8 @@ def load_features(data_dir, checkpoint_path, batch_size, sample_percent=100.0):
     features, paths, metadata = prepare_features(data_dir, checkpoint_path, batch_size, device)
     if isinstance(features, torch.Tensor):
         features = features.numpy()
+    
+    logger.info(f"Features loaded successfully in {time.time() - start_time:.2f} seconds")
     return features, paths, metadata
 
 def extract_date(filename):
@@ -267,8 +282,11 @@ def update_plot_with_new_point(fig, new_point_coords):
     return fig
 
 def main():
+    logger.info("Starting BEATs Feature Visualization application")
+    
     # Parse command line arguments
     args = parse_args()
+    logger.info(f"Parsed arguments: {vars(args)}")
     
     st.set_page_config(layout="wide", page_title="BEATs Feature Visualization")
     st.title("Interactive BEATs Feature Visualization")
@@ -276,29 +294,66 @@ def main():
     # Sidebar for input parameters
     with st.sidebar:
         st.header("Parameters")
-        data_dir = st.text_input("Data Directory", value=args.data_dir)
-        checkpoint_path = st.text_input("Checkpoint Path", value=args.checkpoint_path)
-        batch_size = st.number_input("Batch Size", min_value=1, value=32)
-        sample_percent = st.slider("Dataset Sample Size (%)", 
-                                 min_value=1.0, 
-                                 max_value=100.0, 
-                                 value=args.sample_percent,
-                                 step=1.0,
-                                 help="Reduce load time by processing only a portion of the dataset")
+        data_dir = st.text_input(
+            "Data Directory", 
+            value=args.data_dir,
+            help="Directory containing the audio files to analyze"
+        )
+        checkpoint_path = st.text_input(
+            "Checkpoint Path", 
+            value=args.checkpoint_path,
+            help="Path to the pre-trained BEATs model checkpoint file (.pt)"
+        )
+        batch_size = st.number_input(
+            "Batch Size", 
+            min_value=1, 
+            value=32,
+            help="Number of samples processed together. Higher values use more memory but may be faster"
+        )
+        sample_percent = st.slider(
+            "Dataset Sample Size (%)", 
+            min_value=1.0, 
+            max_value=100.0, 
+            value=args.sample_percent,
+            step=1.0,
+            help="Reduce load time by processing only a portion of the dataset"
+        )
         
         st.divider()
         st.header("t-SNE Parameters")
-        perplexity = st.slider("Perplexity", min_value=5, max_value=100, value=30)
+        perplexity = st.slider(
+            "Perplexity", 
+            min_value=5, 
+            max_value=100, 
+            value=30,
+            help="Balance between preserving local and global structure. Lower values focus on local structure, higher values on global"
+        )
         
         st.divider()
         st.header("UMAP Parameters")
-        n_neighbors = st.slider("Number of Neighbors", min_value=2, max_value=100, value=15)
-        min_dist = st.slider("Minimum Distance", min_value=0.0, max_value=1.0, value=0.1, step=0.05)
+        n_neighbors = st.slider(
+            "Number of Neighbors", 
+            min_value=2, 
+            max_value=100, 
+            value=15,
+            help="Controls how UMAP balances local versus global structure. Higher values result in more global structure being preserved"
+        )
+        min_dist = st.slider(
+            "Minimum Distance", 
+            min_value=0.0, 
+            max_value=1.0, 
+            value=0.1, 
+            step=0.05,
+            help="Controls how tightly UMAP packs points together. Lower values create tighter clusters"
+        )
 
     # Load features (cached)
     try:
+        logger.info("Attempting to load features...")
         features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, sample_percent=sample_percent)
+        logger.info(f"Successfully loaded {len(features)} features")
     except Exception as e:
+        logger.error(f"Error loading features: {str(e)}", exc_info=True)
         st.error(f"Error loading features: {str(e)}")
         return
 
@@ -308,28 +363,34 @@ def main():
     with col1:
         st.header("t-SNE Visualization")
         try:
+            start_time = time.time()
             tsne_embedded, tsne_params = reduce_dimensions(
                 features, 
                 method='tsne',
                 perplexity=perplexity
             )
+            logger.info(f"t-SNE completed in {time.time() - start_time:.2f} seconds")
             fig_tsne = create_plot(tsne_embedded, paths, metadata, 't-SNE', tsne_params)
             st.plotly_chart(fig_tsne)
         except Exception as e:
+            logger.error(f"Error in t-SNE: {str(e)}", exc_info=True)
             st.error(f"Error in t-SNE: {str(e)}")
 
     with col2:
         st.header("UMAP Visualization")
         try:
+            start_time = time.time()
             umap_embedded, umap_params = reduce_dimensions(
                 features,
                 method='umap',
                 n_neighbors=n_neighbors,
                 min_dist=min_dist
             )
+            logger.info(f"UMAP completed in {time.time() - start_time:.2f} seconds")
             fig_umap = create_plot(umap_embedded, paths, metadata, 'UMAP', umap_params)
             st.plotly_chart(fig_umap)
         except Exception as e:
+            logger.error(f"Error in UMAP: {str(e)}", exc_info=True)
             st.error(f"Error in UMAP: {str(e)}")
 
     # Create drag-and-drop area
@@ -342,10 +403,12 @@ def main():
 
     # Process uploaded files if any
     if uploaded_files:
+        logger.info(f"Processing {len(uploaded_files)} uploaded files")
         model = load_trained_model(checkpoint_path)
         model.to(device)
         
         for uploaded_file in uploaded_files:
+            logger.info(f"Processing uploaded file: {uploaded_file.name}")
             st.write(f"Processing {uploaded_file.name}...")
             
             # Extract features from new file
@@ -373,6 +436,7 @@ def main():
 
     st.divider()
     create_feature_analysis_tab(features, paths, metadata)
+    logger.info("Application rendering completed")
 
 if __name__ == "__main__":
     main()
