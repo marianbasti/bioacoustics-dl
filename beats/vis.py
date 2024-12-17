@@ -42,18 +42,20 @@ def load_trained_model(checkpoint_path):
 def get_audio_metadata(filepath):
     """Extract metadata from audio file."""
     try:
-        info = torchaudio.info(filepath)
+        # Split path and segment info
+        actual_path = filepath.split(':')[0]
+        info = torchaudio.info(actual_path)
         metadata = {
             'sample_rate': info.sample_rate,
             'num_frames': info.num_frames,
             'num_channels': info.num_channels,
             'duration': f"{info.num_frames / info.sample_rate:.2f}s",
-            'filename': Path(filepath).name
+            'filename': Path(actual_path).name
         }
         return metadata
     except Exception as e:
         logging.warning(f"Could not extract metadata for {filepath}: {str(e)}")
-        return {'filename': Path(filepath).name, 'error': str(e)}
+        return {'filename': Path(filepath.split(':')[0]).name, 'error': str(e)}
 
 def extract_features(model, dataloader, device, device_ids=None):
     features_list = []
