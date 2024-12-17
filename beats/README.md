@@ -1,4 +1,3 @@
-
 # BEATs
 
 [**BEATs**](https://arxiv.org/abs/2212.09058): **Audio Pre-Training with Acoustic Tokenizers**
@@ -83,6 +82,54 @@ for i, (top5_label_prob, top5_label_idx) in enumerate(zip(*probs.topk(k=5))):
     top5_label = [checkpoint['label_dict'][label_idx.item()] for label_idx in top5_label_idx]
     print(f'Top 5 predicted labels of the {i}th audio are {top5_label} with probability of {top5_label_prob}')
 ```
+### Train BEATs Models
+
+```python
+accelerate launch train.py --data_dir /path/to/audio/dataset
+  --model_path /path/to/pretrained/model \
+  --epochs 100 \
+  --checkpoint_freq 20 \
+  --output_dir /path/to/output/folder \
+  --batch_size 32
+```
+
+### Visualize Embeddings
+
+BEATs provides two visualization tools to analyze audio embeddings:
+
+1. **Command Line Tool** (vis.py) - For generating static visualizations:
+```bash
+python vis.py \
+  --data_dir /path/to/audio/files \
+  --checkpoint_path /path/to/model.pt \
+  --batch_size 32 \
+  --output_dir feature_visualizations \
+  --methods tsne umap \
+  --grid_search '{"tsne": {"perplexity": [5,15,30,50]}, "umap": {"n_neighbors": [5,15,30], "min_dist": [0.1,0.3,0.5]}}'
+```
+
+Key parameters:
+- `--data_dir`: Directory containing audio files
+- `--checkpoint_path`: Path to trained BEATs model
+- `--methods`: Choose visualization methods (tsne and/or umap)
+- `--grid_search`: JSON string defining parameter grid for exploration
+- `--gpu_devices`: Comma-separated list of GPU devices (e.g., "0,1,2,3")
+
+2. **Interactive Dashboard** (interactive_vis.py) - For real-time exploration using Streamlit:
+```bash
+streamlit run interactive_vis.py -- \
+  --data_dir /path/to/audio/files \
+  --checkpoint_path /path/to/model.pt
+```
+
+Features:
+- Interactive t-SNE and UMAP visualizations
+- Adjustable parameters in real-time
+- Clustering analysis
+- PCA dimensionality analysis
+- Temporal pattern visualization
+- Seasonal color coding
+- Detailed audio metadata on hover
 
 ## Evaluation Results
 
