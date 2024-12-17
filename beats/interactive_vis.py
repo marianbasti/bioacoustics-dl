@@ -281,6 +281,17 @@ def update_plot_with_new_point(fig, new_point_coords, point_size):
     )
     return fig
 
+def add_point_to_embedding(existing_features, new_features, existing_embedding, method, **params):
+    """Combine existing and new features, then perform dimension reduction"""
+    # Combine the features
+    combined_features = np.vstack([existing_features, new_features])
+    
+    # Perform dimension reduction on combined features
+    combined_embedded, _ = reduce_dimensions(combined_features, method=method, **params)
+    
+    # Return only the new point's coordinates (last row)
+    return combined_embedded[-1:]
+
 def main():
     logger.info("Starting BEATs Feature Visualization application")
     
@@ -418,18 +429,22 @@ def main():
             
             # Reduce dimensions of new point using the same parameters
             if 'tsne_embedded' in locals():
-                new_tsne, _ = reduce_dimensions(
+                new_tsne = add_point_to_embedding(
+                    features,
                     new_features,
-                    method='tsne',
+                    tsne_embedded,
+                    'tsne',
                     perplexity=perplexity
                 )
                 fig_tsne = update_plot_with_new_point(fig_tsne, new_tsne[0], point_size)
                 col1.plotly_chart(fig_tsne)
             
             if 'umap_embedded' in locals():
-                new_umap, _ = reduce_dimensions(
+                new_umap = add_point_to_embedding(
+                    features,
                     new_features,
-                    method='umap',
+                    umap_embedded,
+                    'umap',
                     n_neighbors=n_neighbors,
                     min_dist=min_dist
                 )
