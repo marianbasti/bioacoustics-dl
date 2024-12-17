@@ -11,8 +11,14 @@ import plotly.graph_objects as go
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-import plotly.figure_factory as ff
-import seaborn as sns
+from dataset import AudioDataset
+from vis import extract_features, load_trained_model
+from torch.utils.data import DataLoader
+
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Interactive BEATs Feature Visualization')
@@ -191,6 +197,47 @@ def create_plot(embedded, paths, metadata, method, params_str):
     
     return fig
 
+def process_dropped_file(uploaded_file, model, device):
+    """Process a single uploaded audio file and extract features"""
+    # Save uploaded file temporarily
+    temp_path = f"temp_{uploaded_file.name}"
+    with open(temp_path, "wb") as f:
+        f.write(uploaded_file.getvalue())
+    
+    # Create temporary dataset with single file
+    dataset = AudioDataset(root_dir=".", file_list=[temp_path])
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    
+    # Extract features
+    features, _, metadata = extract_features(model, dataloader, device)
+    
+    # Cleanup
+    import os
+    os.remove(temp_path)
+    
+    return features.numpy(), metadata[0]
+
+def update_plot_with_new_point(fig, new_point_coords):
+    """Add a new white point to the existing plot"""
+    fig.add_trace(
+        go.Scatter(
+            x=[new_point_coords[0]],
+            y=[new_point_coords[1]],
+            mode='markers',
+            marker=dict(
+                color='white',
+                size=12,
+                line=dict(
+                    color='black',
+                    width=2
+                )
+            ),
+            name='New Point',
+            showlegend=True
+        )
+    )
+    return fig
+
 def main():
     # Parse command line arguments
     args = parse_args()
@@ -250,6 +297,45 @@ def main():
             st.plotly_chart(fig_umap)
         except Exception as e:
             st.error(f"Error in UMAP: {str(e)}")
+
+    # Create drag-and-drop area
+    st.markdown("### Drag and Drop Audio Files")
+    uploaded_files = st.file_uploader(
+        "Drop audio files here to see where they appear in the feature space",
+        accept_multiple_files=True,
+        type=['wav', 'mp3', 'ogg', 'flac']
+    )
+
+    # Process uploaded files if any
+    if uploaded_files:
+        model = load_trained_model(checkpoint_path)
+        model.to(device)
+        
+        for uploaded_file in uploaded_files:
+            st.write(f"Processing {uploaded_file.name}...")
+            
+            # Extract features from new file
+            new_features, new_metadata = process_dropped_file(uploaded_file, model, device)
+            
+            # Reduce dimensions of new point using the same parameters
+            if 'tsne_embedded' in locals():
+                new_tsne, _ = reduce_dimensions(
+                    new_features,
+                    method='tsne',
+                    perplexity=perplexity
+                )
+                fig_tsne = update_plot_with_new_point(fig_tsne, new_tsne[0])
+                col1.plotly_chart(fig_tsne)
+            
+            if 'umap_embedded' in locals():
+                new_umap, _ = reduce_dimensions(
+                    new_features,
+                    method='umap',
+                    n_neighbors=n_neighbors,
+                    min_dist=min_dist
+                )
+                fig_umap = update_plot_with_new_point(fig_umap, new_umap[0])
+                col2.plotly_chart(fig_umap)
 
     st.divider()
     create_feature_analysis_tab(features, paths, metadata)

@@ -1,5 +1,5 @@
 import matplotlib
-matplotlib.use('Agg')  # Add this line before importing pyplot
+matplotlib.use('Agg')
 
 import torch
 import numpy as np
@@ -246,7 +246,7 @@ def prepare_features(data_dir, checkpoint_path, batch_size=32, device='cuda', de
     """Helper function to prepare features for visualization"""
     model = load_trained_model(checkpoint_path)
     dataset = AudioDataset(
-        root_dir=args.data_dir,
+        root_dir=data_dir,
         segment_duration=10,
         overlap=0.0,
         max_segments_per_file=5,
