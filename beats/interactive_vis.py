@@ -192,7 +192,7 @@ def create_seasonal_colorscale():
         [1.0, 'rgb(255,0,0)'],     # back to red (summer)
     ]
 
-def create_plot(embedded, paths, metadata, method, params_str):
+def create_plot(embedded, paths, metadata, method, params_str, point_size):
     """Create an interactive scatter plot using plotly"""
     df = pd.DataFrame({
         f'{method}_1': embedded[:, 0],
@@ -260,7 +260,7 @@ def process_dropped_file(uploaded_file, model, device):
     
     return features.numpy(), metadata[0]
 
-def update_plot_with_new_point(fig, new_point_coords):
+def update_plot_with_new_point(fig, new_point_coords, point_size):
     """Add a new white point to the existing plot"""
     fig.add_trace(
         go.Scatter(
@@ -380,7 +380,7 @@ def main():
                 perplexity=perplexity
             )
             logger.info(f"t-SNE completed in {time.time() - start_time:.2f} seconds")
-            fig_tsne = create_plot(tsne_embedded, paths, metadata, 't-SNE', tsne_params)
+            fig_tsne = create_plot(tsne_embedded, paths, metadata, 't-SNE', tsne_params, point_size)
             st.plotly_chart(fig_tsne)
         except Exception as e:
             logger.error(f"Error in t-SNE: {str(e)}", exc_info=True)
@@ -397,7 +397,7 @@ def main():
                 min_dist=min_dist
             )
             logger.info(f"UMAP completed in {time.time() - start_time:.2f} seconds")
-            fig_umap = create_plot(umap_embedded, paths, metadata, 'UMAP', umap_params)
+            fig_umap = create_plot(umap_embedded, paths, metadata, 'UMAP', umap_params, point_size)
             st.plotly_chart(fig_umap)
         except Exception as e:
             logger.error(f"Error in UMAP: {str(e)}", exc_info=True)
@@ -431,7 +431,7 @@ def main():
                     method='tsne',
                     perplexity=perplexity
                 )
-                fig_tsne = update_plot_with_new_point(fig_tsne, new_tsne[0])
+                fig_tsne = update_plot_with_new_point(fig_tsne, new_tsne[0], point_size)
                 col1.plotly_chart(fig_tsne)
             
             if 'umap_embedded' in locals():
@@ -441,7 +441,7 @@ def main():
                     n_neighbors=n_neighbors,
                     min_dist=min_dist
                 )
-                fig_umap = update_plot_with_new_point(fig_umap, new_umap[0])
+                fig_umap = update_plot_with_new_point(fig_umap, new_umap[0], point_size)
                 col2.plotly_chart(fig_umap)
 
     st.divider()
