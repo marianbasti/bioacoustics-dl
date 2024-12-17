@@ -11,3 +11,4 @@ cuml-cu12 --extra-index-url=https://pypi.ngc.nvidia.com
 streamlit
 plotly
 pandas
+seaborn
