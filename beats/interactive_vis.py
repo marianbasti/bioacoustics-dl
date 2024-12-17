@@ -229,7 +229,7 @@ def create_plot(embedded, paths, metadata, method, params_str):
     
     fig.update_traces(
         hovertemplate=hover_template,
-        marker=dict(size=8)
+        marker=dict(size=point_size)  # Use the point_size parameter
     )
     
     fig.update_layout(
@@ -269,7 +269,7 @@ def update_plot_with_new_point(fig, new_point_coords):
             mode='markers',
             marker=dict(
                 color='white',
-                size=12,
+                size=point_size + 4,  # Make highlighted point slightly larger
                 line=dict(
                     color='black',
                     width=2
@@ -345,6 +345,16 @@ def main():
             value=0.1, 
             step=0.05,
             help="Controls how tightly UMAP packs points together. Lower values create tighter clusters"
+        )
+
+        st.divider()
+        st.header("Visualization Parameters")
+        point_size = st.slider(
+            "Point Size",
+            min_value=1,
+            max_value=12,
+            value=8,
+            help="Size of the points in the scatter plots"
         )
 
     # Load features (cached)
