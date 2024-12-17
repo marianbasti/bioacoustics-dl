@@ -61,21 +61,26 @@ class AudioDataset(Dataset):
             if num_frames < self.samples_per_segment:
                 segments.append((file_path, 0))
             else:
-                possible_segments = [(file_path, i * self.hop_length) 
-                                   for i in range(num_segments)]
+                # Create all possible segment start positions
+                possible_starts = [i * self.hop_length for i in range(num_segments)]
                 
-                if self.max_segments_per_file and len(possible_segments) > self.max_segments_per_file:
+                if self.max_segments_per_file and len(possible_starts) > self.max_segments_per_file:
                     if self.random_segments:
-                        selected = np.random.choice(
-                            possible_segments, 
-                            self.max_segments_per_file, 
+                        # Select random indices first
+                        selected_indices = np.random.choice(
+                            len(possible_starts),
+                            self.max_segments_per_file,
                             replace=False
                         )
-                        segments.extend(selected)
+                        # Use indices to select start positions
+                        selected_starts = [possible_starts[i] for i in selected_indices]
+                        segments.extend((file_path, start) for start in selected_starts)
                     else:
-                        segments.extend(possible_segments[:self.max_segments_per_file])
+                        # Take first n segments
+                        segments.extend((file_path, start) 
+                                     for start in possible_starts[:self.max_segments_per_file])
                 else:
-                    segments.extend(possible_segments)
+                    segments.extend((file_path, start) for start in possible_starts)
                         
         except Exception as e:
             logger.error(f"Error indexing file {file_path}: {str(e)}")
