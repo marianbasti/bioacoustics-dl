@@ -41,6 +41,9 @@ def create_feature_analysis_tab(features, paths, metadata):
     
     # Create tabs for different analyses
     tab1, tab2, tab3 = st.tabs(["Clustering", "PCA Analysis", "Temporal Patterns"])
+    # PCA Analysis
+    pca_result, exp_var_ratio, cum_sum = analyze_features(features)
+    
     
     with tab1:
         # K-means clustering
@@ -60,9 +63,6 @@ def create_feature_analysis_tab(features, paths, metadata):
         st.plotly_chart(fig_clusters)
     
     with tab2:
-        # PCA Analysis
-        pca_result, exp_var_ratio, cum_sum = analyze_features(features)
-        
         # Scree plot
         fig_pca = go.Figure(data=[
             go.Bar(name='Individual', x=range(1, len(exp_var_ratio) + 1), 
