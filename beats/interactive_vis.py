@@ -282,7 +282,7 @@ def main():
         sample_percent = st.slider("Dataset Sample Size (%)", 
                                  min_value=1.0, 
                                  max_value=100.0, 
-                                 value=100.0,
+                                 value=args.sample_percent,
                                  step=1.0,
                                  help="Reduce load time by processing only a portion of the dataset")
         
