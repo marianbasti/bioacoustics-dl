@@ -11,7 +11,8 @@ from accelerate import Accelerator
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, required=True)
-    parser.add_argument("--model_path", type=str, default="BEATs_iter3+_AS2M.pt")
+    parser.add_argument("--model_path", type=str, default=None,
+                      help="Path to pre-trained model (optional)")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -19,6 +20,10 @@ def parse_args():
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--checkpoint_freq", type=int, default=1,
                       help="Save checkpoint every N epochs")
+    parser.add_argument("--encoder_layers", type=int, default=12,
+                      help="Number of encoder layers when training from scratch")
+    parser.add_argument("--encoder_embed_dim", type=int, default=768,
+                      help="Encoder embedding dimension when training from scratch")
     return parser.parse_args()
 
 def advanced_audio_contrastive_loss(features, temperature=0.1):
@@ -57,15 +62,23 @@ def main():
     args = parse_args()
     accelerator = Accelerator()
     
-    # Load pre-trained model safely
-    checkpoint = torch.load(args.model_path, weights_only=True, map_location='cpu')
-    cfg = BEATsConfig(checkpoint['cfg'])
-    
-    # Create model first with original config
-    model = BEATs(cfg)
-    
-    # Load pre-trained weights
-    model.load_state_dict(checkpoint['model'])
+    if args.model_path:
+        # Load pre-trained model
+        checkpoint = torch.load(args.model_path, weights_only=True, map_location='cpu')
+        cfg = BEATsConfig(checkpoint['cfg'])
+        model = BEATs(cfg)
+        model.load_state_dict(checkpoint['model'])
+    else:
+        # Initialize from scratch
+        cfg = BEATsConfig({
+            'encoder_layers': args.encoder_layers,
+            'encoder_embed_dim': args.encoder_embed_dim,
+            'encoder_ffn_embed_dim': args.encoder_embed_dim * 4,
+            'encoder_attention_heads': args.encoder_embed_dim // 64,
+            'input_patch_size': 16,  # common default value
+            'embed_dim': 512,  # common default value
+        })
+        model = BEATs(cfg)
     
     # Setup dataset and dataloader
     dataset = AudioDataset(args.data_dir)
