@@ -64,11 +64,10 @@ def create_feature_analysis_tab(features, paths, metadata):
     
     with tab2:
         # Scree plot
+        x_values = list(range(1, len(exp_var_ratio) + 1))  # Convert range to list
         fig_pca = go.Figure(data=[
-            go.Bar(name='Individual', x=range(1, len(exp_var_ratio) + 1), 
-                  y=exp_var_ratio),
-            go.Scatter(name='Cumulative', x=range(1, len(cum_sum) + 1), 
-                      y=cum_sum, yaxis='y2')
+            go.Bar(name='Individual', x=x_values, y=exp_var_ratio),
+            go.Scatter(name='Cumulative', x=x_values, y=cum_sum, yaxis='y2')
         ])
         
         fig_pca.update_layout(
