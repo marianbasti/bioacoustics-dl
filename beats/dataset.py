@@ -19,7 +19,7 @@ class AudioDataset(Dataset):
         overlap: float = 0.5,
         max_segments_per_file: Optional[int] = None,
         random_segments: bool = True,
-        max_samples: Optional[int] = None  # New parameter
+        max_samples: Optional[int] = None
     ) -> None:
         """
         Args:

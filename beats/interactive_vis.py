@@ -36,7 +36,7 @@ def parse_args():
                       help='Directory containing the audio files')
     parser.add_argument('--checkpoint_path', type=str, default="path/to/checkpoint.pt",
                       help='Path to the trained BEATs model checkpoint')
-    parser.add_argument('--max_samples', type=float, default=None,
+    parser.add_argument('--max_samples', type=int, default=None,
                       help='Set a maximum amount of samples to load')
     return parser.parse_args()
 
