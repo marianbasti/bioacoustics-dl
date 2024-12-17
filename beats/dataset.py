@@ -5,6 +5,10 @@ import numpy as np
 from pathlib import Path
 from typing import List, Union, Tuple, Optional
 from torch.utils.data import Dataset
+from functools import lru_cache
+from concurrent.futures import ProcessPoolExecutor
+
+logger = logging.getLogger(__name__)
 
 class AudioDataset(Dataset):
     def __init__(
@@ -47,40 +51,51 @@ class AudioDataset(Dataset):
         
         logger.info(f"Total files: {len(self.files)}, Total segments: {len(self.segments)}")
     
-    def _index_segments(self) -> None:
-        for file_path in self.files:
-            try:
-                info = torchaudio.info(file_path)
-                num_frames = info.num_frames
-                num_segments = max(1, (num_frames - self.samples_per_segment) // self.hop_length + 1)
+    def _analyze_file(self, file_path: Path) -> List[Tuple[Path, int]]:
+        segments = []
+        try:
+            info = torchaudio.info(file_path)
+            num_frames = info.num_frames
+            num_segments = max(1, (num_frames - self.samples_per_segment) // self.hop_length + 1)
+            
+            if num_frames < self.samples_per_segment:
+                segments.append((file_path, 0))
+            else:
+                possible_segments = [(file_path, i * self.hop_length) 
+                                   for i in range(num_segments)]
                 
-                if num_frames < self.samples_per_segment:
-                    # Short file - just one segment
-                    self.segments.append((file_path, 0))
-                else:
-                    # Long file - multiple segments
-                    possible_segments = [(file_path, i * self.hop_length) 
-                                      for i in range(num_segments)]
-                    
-                    if self.max_segments_per_file and len(possible_segments) > self.max_segments_per_file:
-                        if self.random_segments:
-                            selected = np.random.choice(
-                                possible_segments, 
-                                self.max_segments_per_file, 
-                                replace=False
-                            )
-                            self.segments.extend(selected)
-                        else:
-                            self.segments.extend(possible_segments[:self.max_segments_per_file])
+                if self.max_segments_per_file and len(possible_segments) > self.max_segments_per_file:
+                    if self.random_segments:
+                        selected = np.random.choice(
+                            possible_segments, 
+                            self.max_segments_per_file, 
+                            replace=False
+                        )
+                        segments.extend(selected)
                     else:
-                        self.segments.extend(possible_segments)
+                        segments.extend(possible_segments[:self.max_segments_per_file])
+                else:
+                    segments.extend(possible_segments)
                         
-            except Exception as e:
-                logger.error(f"Error indexing file {file_path}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error indexing file {file_path}: {str(e)}")
+        
+        return segments
+    
+    def _index_segments(self) -> None:
+        with ProcessPoolExecutor() as executor:
+            # Map the _analyze_file method to all files in parallel
+            futures = [executor.submit(self._analyze_file, file_path) 
+                      for file_path in self.files]
+            
+            # Collect results as they complete
+            for future in futures:
+                self.segments.extend(future.result())
     
     def __len__(self) -> int:
         return len(self.segments)
     
+    @lru_cache(maxsize=100)
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, str]:
         file_path, start_frame = self.segments[idx]
         
