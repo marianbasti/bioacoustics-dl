@@ -243,12 +243,12 @@ def create_plot(embedded, paths, metadata, method, params_str):
 def process_dropped_file(uploaded_file, model, device):
     """Process a single uploaded audio file and extract features"""
     # Save uploaded file temporarily
-    temp_path = f"temp_{uploaded_file.name}"
+    temp_path = f"./temp/temp_{uploaded_file.name}"
     with open(temp_path, "wb") as f:
         f.write(uploaded_file.getvalue())
     
     # Create temporary dataset with single file
-    dataset = AudioDataset(root_dir=".", file_list=[temp_path])
+    dataset = AudioDataset(root_dir="./temp",max_segments_per_file=1)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
     
     # Extract features
