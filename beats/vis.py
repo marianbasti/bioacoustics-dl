@@ -245,7 +245,13 @@ DEFAULT_GRID = {
 def prepare_features(data_dir, checkpoint_path, batch_size=32, device='cuda', device_ids=None):
     """Helper function to prepare features for visualization"""
     model = load_trained_model(checkpoint_path)
-    dataset = AudioDataset(data_dir)
+    dataset = AudioDataset(
+        root_dir=args.data_dir,
+        segment_duration=10,
+        overlap=0.0,
+        max_segments_per_file=5,
+        random_segments=True
+    )
     dataloader = DataLoader(dataset, 
                           batch_size=batch_size, 
                           shuffle=False,

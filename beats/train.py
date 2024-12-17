@@ -98,7 +98,13 @@ def main():
     
     # Setup dataset and dataloader
     logger.info(f"Loading dataset from {args.data_dir}")
-    dataset = AudioDataset(args.data_dir)
+    dataset = AudioDataset(
+        root_dir=args.data_dir,
+        segment_duration=10,
+        overlap=0.0,  # 50% overlap between segments
+        max_segments_per_file=5,  # Limit segments per file
+        random_segments=True  # Randomly select segments
+    )
     logger.info(f"Dataset size: {len(dataset)} files")
     dataloader = DataLoader(
         dataset, 
