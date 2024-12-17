@@ -26,6 +26,8 @@ def parse_args():
                       help='Directory containing the audio files')
     parser.add_argument('--checkpoint_path', type=str, default="path/to/checkpoint.pt",
                       help='Path to the trained BEATs model checkpoint')
+    parser.add_argument('--sample_percent', type=float, default=100.0,
+                      help='Percentage of dataset to load (1-100). Default: 100')
     return parser.parse_args()
 
 def analyze_features(features):
@@ -118,9 +120,35 @@ def create_feature_analysis_tab(features, paths, metadata):
         st.plotly_chart(fig_temporal)
 
 @st.cache_data
-def load_features(data_dir, checkpoint_path, batch_size):
+def load_features(data_dir, checkpoint_path, batch_size, sample_percent=100.0):
     """Cache the feature extraction to avoid recomputing"""
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    # Create dataset
+    full_dataset = AudioDataset(
+        root_dir=data_dir,
+        segment_duration=10,
+        overlap=0.0,
+        max_segments_per_file=5,
+        random_segments=True
+    )
+    
+    # Sample the dataset if percentage is less than 100
+    if sample_percent < 100:
+        total_size = len(full_dataset)
+        sample_size = int(total_size * (sample_percent / 100))
+        indices = np.random.choice(total_size, sample_size, replace=False)
+        subset = torch.utils.data.Subset(full_dataset, indices)
+        dataset = subset
+    else:
+        dataset = full_dataset
+    
+    dataloader = DataLoader(dataset, 
+                          batch_size=batch_size, 
+                          shuffle=False,
+                          pin_memory=True,
+                          num_workers=2)
+    
     features, paths, metadata = prepare_features(data_dir, checkpoint_path, batch_size, device)
     if isinstance(features, torch.Tensor):
         features = features.numpy()
@@ -251,6 +279,12 @@ def main():
         data_dir = st.text_input("Data Directory", value=args.data_dir)
         checkpoint_path = st.text_input("Checkpoint Path", value=args.checkpoint_path)
         batch_size = st.number_input("Batch Size", min_value=1, value=32)
+        sample_percent = st.slider("Dataset Sample Size (%)", 
+                                 min_value=1.0, 
+                                 max_value=100.0, 
+                                 value=100.0,
+                                 step=1.0,
+                                 help="Reduce load time by processing only a portion of the dataset")
         
         st.divider()
         st.header("t-SNE Parameters")
@@ -263,7 +297,7 @@ def main():
 
     # Load features (cached)
     try:
-        features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size)
+        features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, sample_percent=sample_percent)
     except Exception as e:
         st.error(f"Error loading features: {str(e)}")
         return
