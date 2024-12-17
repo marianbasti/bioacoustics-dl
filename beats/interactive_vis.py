@@ -36,8 +36,8 @@ def parse_args():
                       help='Directory containing the audio files')
     parser.add_argument('--checkpoint_path', type=str, default="path/to/checkpoint.pt",
                       help='Path to the trained BEATs model checkpoint')
-    parser.add_argument('--sample_percent', type=float, default=100.0,
-                      help='Percentage of dataset to load (1-100). Default: 100')
+    parser.add_argument('--max_samples', type=float, default=None,
+                      help='Set a maximum amount of samples to load')
     return parser.parse_args()
 
 def analyze_features(features):
@@ -130,31 +130,31 @@ def create_feature_analysis_tab(features, paths, metadata):
         st.plotly_chart(fig_temporal)
 
 @st.cache_data
-def load_features(data_dir, checkpoint_path, batch_size, sample_percent=100.0):
+def load_features(data_dir, checkpoint_path, batch_size, max_samples=None):
     """Cache the feature extraction to avoid recomputing"""
-    logger.info(f"Loading features from {data_dir} with {sample_percent}% sample size")
+    logger.info(f"Loading features from {data_dir}")
     start_time = time.time()
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # Create dataset
-    full_dataset = AudioDataset(
-        root_dir=data_dir,
-        segment_duration=10,
-        overlap=0.0,
-        max_segments_per_file=5,
-        random_segments=True
-    )
-    
-    # Sample the dataset if percentage is less than 100
-    if sample_percent < 100:
-        total_size = len(full_dataset)
-        sample_size = int(total_size * (sample_percent / 100))
-        indices = np.random.choice(total_size, sample_size, replace=False)
-        subset = torch.utils.data.Subset(full_dataset, indices)
-        dataset = subset
+    if max_samples:
+        dataset = AudioDataset(
+            root_dir=data_dir,
+            segment_duration=10,
+            overlap=0.0,
+            max_segments_per_file=5,
+            random_segments=True,
+            max_samples=max_samples
+        )
     else:
-        dataset = full_dataset
+        dataset = AudioDataset(
+            root_dir=data_dir,
+            segment_duration=10,
+            overlap=0.0,
+            max_segments_per_file=5,
+            random_segments=True,
+        )
     
     dataloader = DataLoader(dataset, 
                           batch_size=batch_size, 
@@ -310,14 +310,6 @@ def main():
             value=32,
             help="Number of samples processed together. Higher values use more memory but may be faster"
         )
-        sample_percent = st.slider(
-            "Dataset Sample Size (%)", 
-            min_value=1.0, 
-            max_value=100.0, 
-            value=args.sample_percent,
-            step=1.0,
-            help="Reduce load time by processing only a portion of the dataset"
-        )
         
         st.divider()
         st.header("t-SNE Parameters")
@@ -360,7 +352,7 @@ def main():
     # Load features (cached)
     try:
         logger.info("Attempting to load features...")
-        features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, sample_percent=sample_percent)
+        features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, max_samples=args.max_samples)
         logger.info(f"Successfully loaded {len(features)} features")
     except Exception as e:
         logger.error(f"Error loading features: {str(e)}", exc_info=True)

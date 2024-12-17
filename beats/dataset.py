@@ -18,7 +18,8 @@ class AudioDataset(Dataset):
         segment_duration: int = 10,
         overlap: float = 0.5,
         max_segments_per_file: Optional[int] = None,
-        random_segments: bool = True
+        random_segments: bool = True,
+        max_samples: Optional[int] = None  # New parameter
     ) -> None:
         """
         Args:
@@ -28,6 +29,7 @@ class AudioDataset(Dataset):
             overlap: Overlap between segments (0.0 to 1.0)
             max_segments_per_file: Maximum segments to extract per file (None for all)
             random_segments: Whether to randomly select segments when max_segments_per_file is set
+            max_samples: Maximum number of audio files to use (None for all)
         """
         self.sample_rate = sample_rate
         self.segment_duration = segment_duration
@@ -41,15 +43,23 @@ class AudioDataset(Dataset):
                    f"segment_duration={segment_duration}s, overlap={overlap:.1%}")
         
         # Get all audio files
-        self.files: List[Path] = []
+        all_files: List[Path] = []
         for ext in ['*.wav', '*.mp3', '*.flac']:
-            self.files.extend(Path(root_dir).rglob(ext))
+            all_files.extend(Path(root_dir).rglob(ext))
+        
+        # Randomly sample files if max_samples is set
+        if max_samples and max_samples < len(all_files):
+            self.files = list(np.random.choice(all_files, max_samples, replace=False))
+        else:
+            self.files = all_files
             
+        logger.info(f"Total available files: {len(all_files)}, Selected files: {len(self.files)}")
+        
         # Pre-compute segment information for each file
         self.segments: List[Tuple[Path, int]] = []  # (file_path, segment_start)
         self._index_segments()
         
-        logger.info(f"Total files: {len(self.files)}, Total segments: {len(self.segments)}")
+        logger.info(f"Total segments: {len(self.segments)}")
     
     def _analyze_file(self, file_path: Path) -> List[Tuple[Path, int]]:
         segments = []
