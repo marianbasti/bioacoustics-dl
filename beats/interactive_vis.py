@@ -44,8 +44,15 @@ def create_feature_analysis_tab(features, paths, metadata):
     # PCA Analysis
     pca_result, exp_var_ratio, cum_sum = analyze_features(features)
     
-    
     with tab1:
+        st.markdown("""
+        **K-means Clustering**
+        
+        El algoritmo K-means es una técnica de agrupamiento que divide los datos en grupos (clusters) 
+        basándose en la similitud de sus características. Cada punto se asigna al grupo cuyo centro 
+        (centroide) está más cerca. Esto nos permite identificar patrones y grupos naturales en 
+        nuestros datos de audio.
+        """)
         # K-means clustering
         n_clusters = st.slider("Number of Clusters", 2, 10, 4)
         kmeans = KMeans(n_clusters=n_clusters)
@@ -63,6 +70,14 @@ def create_feature_analysis_tab(features, paths, metadata):
         st.plotly_chart(fig_clusters)
     
     with tab2:
+        st.markdown("""
+        **Análisis de Componentes Principales (PCA)**
+        
+        PCA es una técnica que reduce la dimensionalidad de los datos, manteniendo la mayor cantidad 
+        de información posible. El gráfico muestra cuánta varianza explica cada componente principal 
+        (barras azules) y la varianza acumulada (línea naranja). Esto nos ayuda a entender la 
+        complejidad y estructura de nuestros datos de audio.
+        """)
         # Scree plot
         x_values = list(range(1, len(exp_var_ratio) + 1))  # Convert range to list
         fig_pca = go.Figure(data=[
@@ -79,6 +94,14 @@ def create_feature_analysis_tab(features, paths, metadata):
         st.plotly_chart(fig_pca)
         
     with tab3:
+        st.markdown("""
+        **Patrones Temporales**
+        
+        Esta visualización muestra la distribución temporal de las grabaciones de audio a lo largo 
+        de los meses del año. Nos permite identificar patrones estacionales y temporales en la 
+        recolección de datos, lo cual puede ser útil para entender comportamientos acústicos 
+        específicos de ciertas épocas del año.
+        """)
         # Temporal patterns
         dates = [extract_date(p) for p in paths]
         months = [d.month for d in dates if d]
