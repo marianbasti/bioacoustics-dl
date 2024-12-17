@@ -1,9 +1,6 @@
+import logging
 import torch
 import argparse
-import logging
-import psutil
-import os
-from datetime import datetime
 from pathlib import Path
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
@@ -11,17 +8,6 @@ from torch.nn import functional as F
 from dataset import AudioDataset
 from BEATs import BEATs, BEATsConfig
 from accelerate import Accelerator
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(f'training_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
-    ]
-)
-logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -73,25 +59,22 @@ def advanced_audio_contrastive_loss(features, temperature=0.1):
     
     return loss
 
-def log_system_info():
-    logger.info("=== System Information ===")
-    logger.info(f"PyTorch version: {torch.__version__}")
-    logger.info(f"CUDA available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
-        logger.info(f"CUDA memory allocated: {torch.cuda.memory_allocated(0) / 1024**2:.2f} MB")
-    logger.info(f"CPU count: {psutil.cpu_count()}")
-    logger.info(f"RAM available: {psutil.virtual_memory().available / 1024**3:.2f} GB")
-
 def main():
     args = parse_args()
-    logger.info("=== Training Configuration ===")
-    for arg, value in vars(args).items():
-        logger.info(f"{arg}: {value}")
     
-    log_system_info()
+    # Setup logging
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO,
+        handlers=[
+            logging.FileHandler(Path(args.output_dir) / "training.log"),
+            logging.StreamHandler()
+        ]
+    )
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Starting training with arguments: {vars(args)}")
     accelerator = Accelerator()
-    logger.info(f"Using accelerator: {accelerator.state}")
     
     if args.model_path:
         logger.info(f"Loading pre-trained model from {args.model_path}")
@@ -101,23 +84,22 @@ def main():
         model = BEATs(cfg)
         model.load_state_dict(checkpoint['model'])
     else:
-        logger.info("Initializing model from scratch with configuration:")
-        cfg_dict = {
+        logger.info("Initializing model from scratch")
+        # Initialize from scratch
+        cfg = BEATsConfig({
             'encoder_layers': args.encoder_layers,
             'encoder_embed_dim': args.encoder_embed_dim,
             'encoder_ffn_embed_dim': args.encoder_embed_dim * 4,
             'encoder_attention_heads': args.encoder_embed_dim // 64,
             'input_patch_size': 16,  # common default value
             'embed_dim': 512,  # common default value
-        }
-        logger.info(cfg_dict)
-        cfg = BEATsConfig(cfg_dict)
+        })
         model = BEATs(cfg)
     
     # Setup dataset and dataloader
     logger.info(f"Loading dataset from {args.data_dir}")
     dataset = AudioDataset(args.data_dir)
-    logger.info(f"Dataset size: {len(dataset)} samples")
+    logger.info(f"Dataset size: {len(dataset)} files")
     dataloader = DataLoader(
         dataset, 
         batch_size=args.batch_size,
@@ -136,21 +118,13 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
     
-    logger.info("=== Starting Training ===")
-    best_loss = float('inf')
-    
+    logger.info("Starting training loop")
     # Training loop
     for epoch in range(args.epochs):
         model.train()
-        epoch_start_time = datetime.now()
         total_loss = 0
         
         for batch_idx, (audio, _) in enumerate(dataloader):  # Modified this line to unpack
-            # Log memory usage periodically
-            if batch_idx % 100 == 0:
-                if torch.cuda.is_available():
-                    logger.debug(f"CUDA memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB")
-                
             # For BEATs, we should pass None as padding_mask since we're using fixed-length inputs
             # The model will handle the padding internally based on the fbank features
             if hasattr(model, 'module'):
@@ -175,19 +149,15 @@ def main():
             total_loss += loss.item() * args.gradient_accumulation_steps
             
             if batch_idx % 10 == 0:
-                logger.info(f"Epoch {epoch}, Batch {batch_idx}/{len(dataloader)}, "
-                          f"Loss: {loss.item():.4f}, "
-                          f"Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
+                logger.info(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.4f}")
         
         avg_loss = total_loss / len(dataloader)
-        epoch_time = datetime.now() - epoch_start_time
-        logger.info(f"Epoch {epoch} completed in {epoch_time}")
-        logger.info(f"Average Loss: {avg_loss:.4f}")
+        logger.info(f"Epoch {epoch} completed, Average Loss: {avg_loss:.4f}")
         
         # Save checkpoint on main process only
-        if avg_loss < best_loss and accelerator.is_main_process:
-            best_loss = avg_loss
-            logger.info(f"New best loss: {best_loss:.4f}, saving checkpoint...")
+        if accelerator.is_main_process and (epoch + 1) % args.checkpoint_freq == 0:
+            checkpoint_path = output_dir / f"checkpoint_epoch_{epoch}.pt"
+            logger.info(f"Saving checkpoint to {checkpoint_path}")
             unwrapped_model = accelerator.unwrap_model(model)
             checkpoint = {
                 'epoch': epoch,
@@ -195,14 +165,10 @@ def main():
                 'optimizer': optimizer.state_dict(),
                 'cfg': cfg.__dict__,
             }
-            torch.save(checkpoint, output_dir / f"checkpoint_epoch_{epoch}.pt")
+            torch.save(checkpoint, checkpoint_path)
         
         # Wait for checkpoint to be saved
         accelerator.wait_for_everyone()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        logger.exception("Training failed with exception")
-        raise
+    main()
