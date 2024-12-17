@@ -7,7 +7,12 @@ import numpy as np
 import argparse
 import re
 from datetime import datetime
-import colorsys
+import plotly.graph_objects as go
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+import plotly.figure_factory as ff
+import seaborn as sns
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Interactive BEATs Feature Visualization')
