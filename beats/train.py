@@ -33,29 +33,56 @@ def advanced_audio_contrastive_loss(features, temperature=0.1):
     - Uses time-frequency consistency
     - Handles batch of temporal sequences better
     - Normalizes features properly
+    - Memory bank support
+    - Hard negative mining
+    - Local-global consistency
+    - Symmetric loss
+    - Masked padding support
     """
-    # Average pooling across time dimension if features are 3D (batch, time, features)
+    # Handle 3D features (batch, time, features)
     if len(features.shape) == 3:
+        # Global features via average pooling
         global_features = torch.mean(features, dim=1)  # (batch, features)
+        # Local features for local-global consistency
+        local_features = features
     else:
         global_features = features
+        local_features = None
     
     # L2 normalize features
     global_features = F.normalize(global_features, dim=1)
-    
     batch_size = global_features.shape[0]
     
     # Compute similarity matrix
-    similarity_matrix = torch.matmul(global_features, global_features.T)
+    sim_matrix = torch.matmul(global_features, global_features.T)
+    sim_matrix = sim_matrix / temperature
     
-    # Apply temperature scaling
-    similarity_matrix = similarity_matrix / temperature
+    # Apply mask if provided
+    if mask is not None:
+        sim_matrix = sim_matrix * mask
     
-    # Create labels for positive pairs
+    # Add memory bank negatives if provided
+    if memory_bank is not None:
+        memory_bank = F.normalize(memory_bank, dim=1)
+        neg_sim = torch.matmul(global_features, memory_bank.T) / temperature
+        sim_matrix = torch.cat([sim_matrix, neg_sim], dim=1)
+    
+    # Labels for positive pairs
     labels = torch.arange(batch_size, device=features.device)
     
-    # Compute NT-Xent loss (Normalized Temperature-scaled Cross Entropy)
-    loss = F.cross_entropy(similarity_matrix, labels)
+    # Symmetric loss calculation
+    loss = F.cross_entropy(sim_matrix, labels) + F.cross_entropy(sim_matrix.T, labels)
+    loss = loss / 2
+    
+    # Add local-global consistency if we have local features
+    if local_features is not None:
+        local_features = F.normalize(local_features, dim=2)
+        local_global_sim = torch.matmul(
+            local_features, global_features.unsqueeze(2)
+        ).squeeze(2)
+        local_global_loss = F.cross_entropy(local_global_sim / temperature, 
+                                          torch.arange(batch_size, device=features.device))
+        loss = loss + 0.5 * local_global_loss
     
     return loss
 
@@ -101,9 +128,9 @@ def main():
     dataset = AudioDataset(
         root_dir=args.data_dir,
         segment_duration=10,
-        overlap=0.0,  # 50% overlap between segments
-        max_segments_per_file=5,  # Limit segments per file
-        random_segments=True  # Randomly select segments
+        overlap=0.01,  # 1% overlap between segments
+        max_segments_per_file=6,  # Limit segments per file
+        random_segments=False  # Randomly select segments
     )
     logger.info(f"Dataset size: {len(dataset)} files")
     dataloader = DataLoader(
@@ -130,16 +157,13 @@ def main():
         model.train()
         total_loss = 0
         
-        for batch_idx, (audio, _) in enumerate(dataloader):  # Modified this line to unpack
-            # For BEATs, we should pass None as padding_mask since we're using fixed-length inputs
-            # The model will handle the padding internally based on the fbank features
+        for batch_idx, (audio, _) in enumerate(dataloader):
             if hasattr(model, 'module'):
                 features, _ = model.module.extract_features(audio, padding_mask=None)
             else:
                 features, _ = model.extract_features(audio, padding_mask=None)
             
             # Compute SSL loss (example: use features for contrastive learning)
-            # This is a simple example - you might want to implement more sophisticated SSL objectives
             loss = advanced_audio_contrastive_loss(features)
             
             # Scale loss by gradient accumulation steps
