@@ -9,6 +9,36 @@ from dataset import AudioDataset
 from BEATs import BEATs, BEATsConfig
 from accelerate import Accelerator
 
+class MemoryBank:
+    def __init__(self, size=4096, feature_dim=768, device='cuda'):
+        """
+        Args:
+            size: Number of features to store
+            feature_dim: Dimension of each feature vector
+            device: Device to store the features on
+        """
+        self.size = size
+        self.feature_dim = feature_dim
+        self.bank = torch.randn(size, feature_dim, device=device)
+        self.bank = F.normalize(self.bank, dim=1)
+        self.pointer = 0
+
+    def update(self, features):
+        """Update memory bank with new features"""
+        batch_size = features.shape[0]
+        features = F.normalize(features.detach(), dim=1)
+        
+        # Update memory bank
+        if self.pointer + batch_size >= self.size:
+            self.pointer = 0
+        
+        self.bank[self.pointer:self.pointer + batch_size] = features
+        self.pointer = (self.pointer + batch_size) % self.size
+
+    def get_memory(self):
+        """Return current memory bank"""
+        return self.bank
+    
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, required=True)
@@ -27,7 +57,7 @@ def parse_args():
                       help="Encoder embedding dimension when training from scratch")
     return parser.parse_args()
 
-def advanced_audio_contrastive_loss(features, temperature=0.1):
+def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None, mask=None):
     """
     Enhanced contrastive loss for audio features:
     - Uses time-frequency consistency
@@ -151,6 +181,13 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
     
+    # Initialize memory bank
+    memory_bank = MemoryBank(
+        size=4096,  # Store 4096 negative examples
+        feature_dim=args.encoder_embed_dim,  # Match model dimension
+        device=accelerator.device
+    )
+
     logger.info("Starting training loop")
     # Training loop
     for epoch in range(args.epochs):
@@ -163,12 +200,18 @@ def main():
             else:
                 features, _ = model.extract_features(audio, padding_mask=None)
             
+            # Get global features
+            global_features = torch.mean(features, dim=1)
+
             # Compute SSL loss (example: use features for contrastive learning)
-            loss = advanced_audio_contrastive_loss(features)
+            loss = advanced_audio_contrastive_loss(features,memory_bank=memory_bank.get_memory())
             
             # Scale loss by gradient accumulation steps
             loss = loss / args.gradient_accumulation_steps
             
+            # Update memory bank with current batch
+            memory_bank.update(global_features)
+
             # Backward pass with accelerator
             accelerator.backward(loss)
             
