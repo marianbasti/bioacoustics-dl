@@ -481,8 +481,10 @@ def main():
                 method='tsne',
                 perplexity=perplexity
             )
+            st.session_state.tsne_embedded = tsne_embedded
             logger.info(f"t-SNE completed in {time.time() - start_time:.2f} seconds")
             fig_tsne = create_plot(tsne_embedded, paths, metadata, 't-SNE', tsne_params, point_size)
+            st.session_state.fig_tsne = fig_tsne
             st.plotly_chart(fig_tsne)
         except Exception as e:
             logger.error(f"Error in t-SNE: {str(e)}", exc_info=True)
@@ -498,8 +500,10 @@ def main():
                 n_neighbors=n_neighbors,
                 min_dist=min_dist
             )
+            st.session_state.umap_embedded = umap_embedded
             logger.info(f"UMAP completed in {time.time() - start_time:.2f} seconds")
             fig_umap = create_plot(umap_embedded, paths, metadata, 'UMAP', umap_params, point_size)
+            st.session_state.fig_umap = fig_umap
             st.plotly_chart(fig_umap)
         except Exception as e:
             logger.error(f"Error in UMAP: {str(e)}", exc_info=True)
@@ -523,22 +527,31 @@ def main():
             logger.info(f"Processing uploaded file: {uploaded_file.name}")
             st.write(f"Processing {uploaded_file.name}...")
             
-            # Extract features from new file
-            new_features, new_metadata = process_dropped_file(uploaded_file, model, device)
-            
-            # Update existing plots with new points
-            if hasattr(st.session_state, 'tsne_embedded'):
-                new_tsne = add_point_to_embedding(
+            try:
+                # Extract features from new file
+                new_features, new_metadata = process_dropped_file(uploaded_file, model, device)
+                
+                # Get new coordinates for t-SNE
+                new_tsne_point = add_point_to_embedding(
                     features,
                     new_features,
                     st.session_state.tsne_embedded,
                     'tsne',
                     perplexity=perplexity
                 )
-                st.session_state.fig_tsne = update_plot_with_new_point(st.session_state.fig_tsne, new_tsne[0], point_size)
-            
-            if hasattr(st.session_state, 'umap_embedded'):
-                new_umap = add_point_to_embedding(
+                
+                # Update t-SNE plot
+                updated_tsne_fig = update_plot_with_new_point(
+                    st.session_state.fig_tsne, 
+                    new_tsne_point[0],
+                    0,  # seasonal value (you might want to calculate this)
+                    point_size
+                )
+                st.session_state.fig_tsne = updated_tsne_fig
+                st.plotly_chart(updated_tsne_fig)
+                
+                # Do the same for UMAP
+                new_umap_point = add_point_to_embedding(
                     features,
                     new_features,
                     st.session_state.umap_embedded,
@@ -546,7 +559,20 @@ def main():
                     n_neighbors=n_neighbors,
                     min_dist=min_dist
                 )
-                st.session_state.fig_umap = update_plot_with_new_point(st.session_state.fig_umap, new_umap[0], point_size)
+                
+                # Update UMAP plot
+                updated_umap_fig = update_plot_with_new_point(
+                    st.session_state.fig_umap, 
+                    new_umap_point[0],
+                    0,  # seasonal value (you might want to calculate this)
+                    point_size
+                )
+                st.session_state.fig_umap = updated_umap_fig
+                st.plotly_chart(updated_umap_fig)
+                
+            except Exception as e:
+                logger.error(f"Error processing file {uploaded_file.name}: {str(e)}", exc_info=True)
+                st.error(f"Error processing file {uploaded_file.name}: {str(e)}")
 
     st.divider()
     create_feature_analysis_tab(features, paths, metadata)
