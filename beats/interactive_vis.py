@@ -248,20 +248,25 @@ def create_seasonal_colorscale():
     ]
 
 def reduce_dimensions_3d(features, method, **params):
-    """Reduce dimensions while preserving a third meaningful dimension using PCA"""
-    # First get 2D embedding using specified method
+    """Reduce dimensions using the same method twice - once for 2D and once for 1D"""
+    # Get 2D embedding using specified method
     embedded_2d, params_str = reduce_dimensions(features, method=method, **params)
     
-    # Get third dimension using PCA on original features
-    pca = PCA(n_components=1)
-    third_dim = pca.fit_transform(features).flatten()
+    # Get third dimension using same method but with n_components=1
+    if method == 'tsne':
+        from sklearn.manifold import TSNE
+        reducer_1d = TSNE(n_components=1, **params)
+        third_dim = reducer_1d.fit_transform(features).flatten()
+    elif method == 'umap':
+        import umap
+        reducer_1d = umap.UMAP(n_components=1, **params)
+        third_dim = reducer_1d.fit_transform(features).flatten()
     
-    # Combine 2D embedding with PCA dimension
+    # Combine 2D embedding with third dimension
     embedded_3d = np.column_stack((embedded_2d, third_dim))
     
-    # Update params string to include PCA variance
-    pca_var = pca.explained_variance_ratio_[0]
-    params_str += f", PCA-3rd-dim var: {pca_var:.2%}"
+    # Update params string
+    params_str += f", {method.upper()}-3rd-dim"
     
     return embedded_3d, params_str
 
@@ -270,7 +275,7 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
     df = pd.DataFrame({
         f'{method}_1': embedded[:, 0],
         f'{method}_2': embedded[:, 1],
-        'Feature_depth': embedded[:, 2],  # PCA-based third dimension
+        f'{method}_3': embedded[:, 2],  # Now using same algorithm
     })
     
     # Add metadata columns and extract dates
@@ -294,7 +299,7 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
     fig = go.Figure(data=[go.Scatter3d(
         x=df[f'{method}_1'],
         y=df[f'{method}_2'],
-        z=df['Feature_depth'],
+        z=df[f'{method}_3'],  # Updated variable name
         mode='markers',
         marker=dict(
             size=point_size,
@@ -308,7 +313,7 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
             df['duration'], 
             df['num_channels'],
             df['date'].dt.strftime('%Y-%m-%d'),
-            df['Feature_depth']
+            df[f'{method}_3']  # Updated variable name
         )),
         hovertemplate=hover_template
     )])
@@ -318,7 +323,7 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
         scene=dict(
             xaxis_title=f'{method}_1',
             yaxis_title=f'{method}_2',
-            zaxis_title='Feature Depth',
+            zaxis_title=f'{method}_3',  # Updated title
             camera=dict(
                 up=dict(x=0, y=0, z=1),
                 center=dict(x=0, y=0, z=0),
