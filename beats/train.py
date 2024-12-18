@@ -82,6 +82,8 @@ def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None,
     # L2 normalize features
     global_features = F.normalize(global_features, dim=1)
     batch_size = global_features.shape[0]
+    # Define labels for positive pairs
+    labels = torch.arange(batch_size, device=features.device)
     
     # Compute similarity matrix
     sim_matrix = torch.matmul(global_features, global_features.T)
@@ -100,11 +102,10 @@ def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None,
         current_batch_loss = F.cross_entropy(sim_matrix, labels)
         
         # For memory bank part, all samples are negatives
-        # Create labels for expanded similarity matrix (all memory bank entries are negatives)
         expanded_sim = torch.cat([sim_matrix, neg_sim], dim=1)
-        expanded_labels = labels  # Use same labels as we want to predict original positives
         
-        expanded_loss = F.cross_entropy(expanded_sim, expanded_labels)
+        # Use same labels since we want to predict original positives
+        expanded_loss = F.cross_entropy(expanded_sim, labels)
         
         loss = (current_batch_loss + expanded_loss) / 2
     else:
