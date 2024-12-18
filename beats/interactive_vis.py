@@ -248,7 +248,7 @@ def create_seasonal_colorscale():
     ]
 
 def create_plot(embedded, paths, metadata, method, params_str, point_size):
-    """Create an interactive scatter plot using plotly"""
+    """Create an interactive 3D scatter plot using plotly"""
     df = pd.DataFrame({
         f'{method}_1': embedded[:, 0],
         f'{method}_2': embedded[:, 1],
@@ -271,26 +271,41 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
         "Channels: %{customdata[3]}"
     )
     
-    fig = px.scatter(
-        df,
-        x=f'{method}_1',
-        y=f'{method}_2',
-        title=f'{method.upper()} Visualization ({params_str})',
-        color='seasonal_value',
-        color_continuous_scale=create_seasonal_colorscale(),
-        custom_data=['filename', 'sample_rate', 'duration', 'num_channels', 
-                    df['date'].dt.strftime('%Y-%m-%d')]
-    )
-    
-    fig.update_traces(
-        hovertemplate=hover_template,
-        marker=dict(size=point_size)  # Use the point_size parameter
-    )
+    fig = go.Figure(data=[go.Scatter3d(
+        x=df[f'{method}_1'],
+        y=df[f'{method}_2'],
+        z=df['seasonal_value'],
+        mode='markers',
+        marker=dict(
+            size=point_size,
+            color=df['seasonal_value'],
+            colorscale=create_seasonal_colorscale(),
+            opacity=0.8
+        ),
+        customdata=np.column_stack((
+            df['filename'], 
+            df['sample_rate'], 
+            df['duration'], 
+            df['num_channels'],
+            df['date'].dt.strftime('%Y-%m-%d')
+        )),
+        hovertemplate=hover_template
+    )])
     
     fig.update_layout(
-        width=600,
-        height=600,
-        coloraxis_colorbar_title='Season'
+        title=f'{method.upper()} 3D Visualization ({params_str})',
+        scene=dict(
+            xaxis_title=f'{method}_1',
+            yaxis_title=f'{method}_2',
+            zaxis_title='Season',
+            camera=dict(
+                up=dict(x=0, y=0, z=1),
+                center=dict(x=0, y=0, z=0),
+                eye=dict(x=1.5, y=1.5, z=1.5)
+            )
+        ),
+        width=700,
+        height=700,
     )
     
     return fig
@@ -315,16 +330,17 @@ def process_dropped_file(uploaded_file, model, device):
     
     return features.numpy(), metadata[0]
 
-def update_plot_with_new_point(fig, new_point_coords, point_size):
-    """Add a new white point to the existing plot"""
+def update_plot_with_new_point(fig, new_point_coords, seasonal_value, point_size):
+    """Add a new white point to the existing 3D plot"""
     fig.add_trace(
-        go.Scatter(
+        go.Scatter3d(
             x=[new_point_coords[0]],
             y=[new_point_coords[1]],
+            z=[seasonal_value],
             mode='markers',
             marker=dict(
                 color='white',
-                size=point_size + 4,  # Make highlighted point slightly larger
+                size=point_size + 4,
                 line=dict(
                     color='black',
                     width=2
