@@ -146,14 +146,8 @@ def load_features(data_dir, checkpoint_path, batch_size, max_samples=None):
         random_segments=True,
         max_samples=max_samples
     )
-    
-    dataloader = DataLoader(dataset, 
-                          batch_size=batch_size, 
-                          shuffle=False,
-                          pin_memory=True,
-                          num_workers=2)
-    
-    features, paths, metadata = prepare_features(data_dir, checkpoint_path, batch_size, device)
+        
+    features, paths, metadata = prepare_features(dataset, checkpoint_path, batch_size, device)
     if isinstance(features, torch.Tensor):
         features = features.numpy()
     
