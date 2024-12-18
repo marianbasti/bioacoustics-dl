@@ -247,11 +247,30 @@ def create_seasonal_colorscale():
         [1.0, 'rgb(255,0,0)'],     # back to red (summer)
     ]
 
+def reduce_dimensions_3d(features, method, **params):
+    """Reduce dimensions while preserving a third meaningful dimension using PCA"""
+    # First get 2D embedding using specified method
+    embedded_2d, params_str = reduce_dimensions(features, method=method, **params)
+    
+    # Get third dimension using PCA on original features
+    pca = PCA(n_components=1)
+    third_dim = pca.fit_transform(features).flatten()
+    
+    # Combine 2D embedding with PCA dimension
+    embedded_3d = np.column_stack((embedded_2d, third_dim))
+    
+    # Update params string to include PCA variance
+    pca_var = pca.explained_variance_ratio_[0]
+    params_str += f", PCA-3rd-dim var: {pca_var:.2%}"
+    
+    return embedded_3d, params_str
+
 def create_plot(embedded, paths, metadata, method, params_str, point_size):
     """Create an interactive 3D scatter plot using plotly"""
     df = pd.DataFrame({
         f'{method}_1': embedded[:, 0],
         f'{method}_2': embedded[:, 1],
+        'Feature_depth': embedded[:, 2],  # PCA-based third dimension
     })
     
     # Add metadata columns and extract dates
@@ -268,13 +287,14 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
         "Date: %{customdata[4]}<br>"
         "Sample Rate: %{customdata[1]} Hz<br>"
         "Duration: %{customdata[2]}<br>"
-        "Channels: %{customdata[3]}"
+        "Channels: %{customdata[3]}<br>"
+        "Feature Depth: %{customdata[5]:.2f}"
     )
     
     fig = go.Figure(data=[go.Scatter3d(
         x=df[f'{method}_1'],
         y=df[f'{method}_2'],
-        z=df['seasonal_value'],
+        z=df['Feature_depth'],
         mode='markers',
         marker=dict(
             size=point_size,
@@ -287,7 +307,8 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
             df['sample_rate'], 
             df['duration'], 
             df['num_channels'],
-            df['date'].dt.strftime('%Y-%m-%d')
+            df['date'].dt.strftime('%Y-%m-%d'),
+            df['Feature_depth']
         )),
         hovertemplate=hover_template
     )])
@@ -297,7 +318,7 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
         scene=dict(
             xaxis_title=f'{method}_1',
             yaxis_title=f'{method}_2',
-            zaxis_title='Season',
+            zaxis_title='Feature Depth',
             camera=dict(
                 up=dict(x=0, y=0, z=1),
                 center=dict(x=0, y=0, z=0),
@@ -455,7 +476,7 @@ def main():
         st.header("t-SNE Visualization")
         try:
             start_time = time.time()
-            tsne_embedded, tsne_params = reduce_dimensions(
+            tsne_embedded, tsne_params = reduce_dimensions_3d(  # Changed to 3D
                 features, 
                 method='tsne',
                 perplexity=perplexity
@@ -471,7 +492,7 @@ def main():
         st.header("UMAP Visualization")
         try:
             start_time = time.time()
-            umap_embedded, umap_params = reduce_dimensions(
+            umap_embedded, umap_params = reduce_dimensions_3d(  # Changed to 3D
                 features,
                 method='umap',
                 n_neighbors=n_neighbors,
