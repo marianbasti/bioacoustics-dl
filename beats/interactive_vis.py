@@ -138,23 +138,14 @@ def load_features(data_dir, checkpoint_path, batch_size, max_samples=None):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # Create dataset
-    if max_samples:
-        dataset = AudioDataset(
-            root_dir=data_dir,
-            segment_duration=10,
-            overlap=0.0,
-            max_segments_per_file=5,
-            random_segments=True,
-            max_samples=max_samples
-        )
-    else:
-        dataset = AudioDataset(
-            root_dir=data_dir,
-            segment_duration=10,
-            overlap=0.0,
-            max_segments_per_file=5,
-            random_segments=True,
-        )
+    dataset = AudioDataset(
+        root_dir=data_dir,
+        segment_duration=10,
+        overlap=0.0,
+        max_segments_per_file=5,
+        random_segments=True,
+        max_samples=max_samples
+    )
     
     dataloader = DataLoader(dataset, 
                           batch_size=batch_size, 
