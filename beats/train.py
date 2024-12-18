@@ -95,14 +95,22 @@ def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None,
     if memory_bank is not None:
         memory_bank = F.normalize(memory_bank, dim=1)
         neg_sim = torch.matmul(global_features, memory_bank.T) / temperature
-        sim_matrix = torch.cat([sim_matrix, neg_sim], dim=1)
-    
-    # Labels for positive pairs
-    labels = torch.arange(batch_size, device=features.device)
-    
-    # Symmetric loss calculation
-    loss = F.cross_entropy(sim_matrix, labels) + F.cross_entropy(sim_matrix.T, labels)
-    loss = loss / 2
+        
+        # Create separate losses for current batch and memory bank
+        current_batch_loss = F.cross_entropy(sim_matrix, labels)
+        
+        # For memory bank part, all samples are negatives
+        # Create labels for expanded similarity matrix (all memory bank entries are negatives)
+        expanded_sim = torch.cat([sim_matrix, neg_sim], dim=1)
+        expanded_labels = labels  # Use same labels as we want to predict original positives
+        
+        expanded_loss = F.cross_entropy(expanded_sim, expanded_labels)
+        
+        loss = (current_batch_loss + expanded_loss) / 2
+    else:
+        # Original symmetric loss when no memory bank is used
+        loss = F.cross_entropy(sim_matrix, labels) + F.cross_entropy(sim_matrix.T, labels)
+        loss = loss / 2
     
     # Add local-global consistency if we have local features
     if local_features is not None:
