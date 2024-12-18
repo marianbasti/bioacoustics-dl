@@ -288,6 +288,7 @@ def add_point_to_embedding(existing_features, new_features, existing_embedding, 
 
 def main():
     logger = setup_logging()
+    st.set_page_config(layout="wide", page_title="BEATs Feature Visualization")
     # Use session state to track initialization
     if 'initialized' not in st.session_state:
         logger.info("Starting BEATs Feature Visualization application")
@@ -297,7 +298,6 @@ def main():
     args = st.session_state.args
 
     # Remove the logging message here since we moved it to first initialization
-    st.set_page_config(layout="wide", page_title="BEATs Feature Visualization")
     st.title("Interactive BEATs Feature Visualization")
 
     # Sidebar for input parameters
