@@ -16,6 +16,7 @@ from vis import extract_features, load_trained_model
 from torch.utils.data import DataLoader
 import logging
 import time
+import os
 
 # Move logging setup outside of cache
 logging.basicConfig(
@@ -62,12 +63,45 @@ def analyze_features(features):
     
     return pca_result, exp_var_ratio, cum_sum_eigenvalues
 
+@st.cache_data
+def parse_training_log(checkpoint_path):
+    """Parse training log file to extract loss values"""
+    log_path = os.path.join(os.path.dirname(checkpoint_path), 'training.log')
+    if not os.path.exists(log_path):
+        return None
+    
+    epochs = []
+    batches = []
+    losses = []
+    
+    with open(log_path, 'r') as f:
+        for line in f:
+            if 'Epoch' in line and 'Loss:' in line:
+                try:
+                    # Extract values using regex
+                    epoch_match = re.search(r'Epoch (\d+)', line)
+                    batch_match = re.search(r'Batch (\d+)', line)
+                    loss_match = re.search(r'Loss: ([\d.]+)', line)
+                    
+                    if epoch_match and batch_match and loss_match:
+                        epochs.append(int(epoch_match.group(1)))
+                        batches.append(int(batch_match.group(1)))
+                        losses.append(float(loss_match.group(1)))
+                except:
+                    continue
+    
+    return pd.DataFrame({
+        'epoch': epochs,
+        'batch': batches,
+        'loss': losses
+    })
+
 def create_feature_analysis_tab(features, paths, metadata):
     """Create additional analysis visualizations"""
     st.header("Feature Analysis")
     
     # Create tabs for different analyses
-    tab1, tab2, tab3 = st.tabs(["Clustering", "PCA Analysis", "Temporal Patterns"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Clustering", "PCA Analysis", "Temporal Patterns", "Training Loss"])
     # PCA Analysis
     pca_result, exp_var_ratio, cum_sum = analyze_features(features)
     
@@ -137,6 +171,33 @@ def create_feature_analysis_tab(features, paths, metadata):
                                   title='Monthly Distribution',
                                   labels={'x': 'Month', 'y': 'Count'})
         st.plotly_chart(fig_temporal)
+
+    with tab4:
+        st.markdown("""
+        **Training Loss**
+        
+        This graph shows the evolution of the training loss over time. Lower values indicate better model performance.
+        The x-axis represents training progress through epochs and batches, while the y-axis shows the loss value.
+        """)
+        
+        loss_df = parse_training_log(st.session_state.args.checkpoint_path)
+        if loss_df is not None:
+            # Create global step for x-axis
+            loss_df['step'] = loss_df['epoch'] * loss_df['batch'].max() + loss_df['batch']
+            
+            fig_loss = px.line(loss_df, x='step', y='loss', 
+                             title='Training Loss Over Time',
+                             labels={'step': 'Training Steps', 'loss': 'Loss Value'})
+            
+            # Add epoch markers
+            epoch_changes = loss_df[loss_df['batch'] == 1]
+            for _, row in epoch_changes.iterrows():
+                fig_loss.add_vline(x=row['step'], line_dash="dash", 
+                                 annotation_text=f"Epoch {row['epoch']}")
+            
+            st.plotly_chart(fig_loss)
+        else:
+            st.warning("No training log file found at the checkpoint location.")
 
 @st.cache_data
 def load_features(data_dir, checkpoint_path, batch_size, max_samples=None):
