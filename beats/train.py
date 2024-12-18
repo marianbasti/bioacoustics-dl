@@ -119,6 +119,10 @@ def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None,
 def main():
     args = parse_args()
     
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+    
     # Setup logging
     logging.basicConfig(
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -176,10 +180,6 @@ def main():
     
     # Prepare everything with accelerator
     model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
-    
-    # Create output directory
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(exist_ok=True, parents=True)
     
     # Initialize memory bank
     memory_bank = MemoryBank(
