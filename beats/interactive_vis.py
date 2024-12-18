@@ -370,21 +370,29 @@ def main():
         st.error(f"Error loading features: {str(e)}")
         return
 
+    # Initialize session state for plots
+    if 'fig_tsne' not in st.session_state:
+        st.session_state.fig_tsne = None
+    if 'fig_umap' not in st.session_state:
+        st.session_state.fig_umap = None
+
     # Create two columns for visualizations
     col1, col2 = st.columns(2)
 
     with col1:
         st.header("t-SNE Visualization")
         try:
-            start_time = time.time()
-            tsne_embedded, tsne_params = reduce_dimensions(
-                features, 
-                method='tsne',
-                perplexity=perplexity
-            )
-            logger.info(f"t-SNE completed in {time.time() - start_time:.2f} seconds")
-            fig_tsne = create_plot(tsne_embedded, paths, metadata, 't-SNE', tsne_params, point_size)
-            st.plotly_chart(fig_tsne)
+            if st.session_state.fig_tsne is None:
+                start_time = time.time()
+                tsne_embedded, tsne_params = reduce_dimensions(
+                    features, 
+                    method='tsne',
+                    perplexity=perplexity
+                )
+                logger.info(f"t-SNE completed in {time.time() - start_time:.2f} seconds")
+                st.session_state.fig_tsne = create_plot(tsne_embedded, paths, metadata, 't-SNE', tsne_params, point_size)
+                st.session_state.tsne_embedded = tsne_embedded  # Store embedding for later use
+            st.plotly_chart(st.session_state.fig_tsne)
         except Exception as e:
             logger.error(f"Error in t-SNE: {str(e)}", exc_info=True)
             st.error(f"Error in t-SNE: {str(e)}")
@@ -392,16 +400,18 @@ def main():
     with col2:
         st.header("UMAP Visualization")
         try:
-            start_time = time.time()
-            umap_embedded, umap_params = reduce_dimensions(
-                features,
-                method='umap',
-                n_neighbors=n_neighbors,
-                min_dist=min_dist
-            )
-            logger.info(f"UMAP completed in {time.time() - start_time:.2f} seconds")
-            fig_umap = create_plot(umap_embedded, paths, metadata, 'UMAP', umap_params, point_size)
-            st.plotly_chart(fig_umap)
+            if st.session_state.fig_umap is None:
+                start_time = time.time()
+                umap_embedded, umap_params = reduce_dimensions(
+                    features,
+                    method='umap',
+                    n_neighbors=n_neighbors,
+                    min_dist=min_dist
+                )
+                logger.info(f"UMAP completed in {time.time() - start_time:.2f} seconds")
+                st.session_state.fig_umap = create_plot(umap_embedded, paths, metadata, 'UMAP', umap_params, point_size)
+                st.session_state.umap_embedded = umap_embedded  # Store embedding for later use
+            st.plotly_chart(st.session_state.fig_umap)
         except Exception as e:
             logger.error(f"Error in UMAP: {str(e)}", exc_info=True)
             st.error(f"Error in UMAP: {str(e)}")
@@ -427,29 +437,27 @@ def main():
             # Extract features from new file
             new_features, new_metadata = process_dropped_file(uploaded_file, model, device)
             
-            # Reduce dimensions of new point using the same parameters
-            if 'tsne_embedded' in locals():
+            # Update existing plots with new points
+            if hasattr(st.session_state, 'tsne_embedded'):
                 new_tsne = add_point_to_embedding(
                     features,
                     new_features,
-                    tsne_embedded,
+                    st.session_state.tsne_embedded,
                     'tsne',
                     perplexity=perplexity
                 )
-                fig_tsne = update_plot_with_new_point(fig_tsne, new_tsne[0], point_size)
-                col1.plotly_chart(fig_tsne)
+                st.session_state.fig_tsne = update_plot_with_new_point(st.session_state.fig_tsne, new_tsne[0], point_size)
             
-            if 'umap_embedded' in locals():
+            if hasattr(st.session_state, 'umap_embedded'):
                 new_umap = add_point_to_embedding(
                     features,
                     new_features,
-                    umap_embedded,
+                    st.session_state.umap_embedded,
                     'umap',
                     n_neighbors=n_neighbors,
                     min_dist=min_dist
                 )
-                fig_umap = update_plot_with_new_point(fig_umap, new_umap[0], point_size)
-                col2.plotly_chart(fig_umap)
+                st.session_state.fig_umap = update_plot_with_new_point(st.session_state.fig_umap, new_umap[0], point_size)
 
     st.divider()
     create_feature_analysis_tab(features, paths, metadata)
