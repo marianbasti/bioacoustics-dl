@@ -287,13 +287,13 @@ def add_point_to_embedding(existing_features, new_features, existing_embedding, 
     return combined_embedded[-1:]
 
 def main():
+    logger = setup_logging()
     # Use session state to track initialization
     if 'initialized' not in st.session_state:
         logger.info("Starting BEATs Feature Visualization application")
         st.session_state.initialized = True
         st.session_state.args = get_args()
     
-    logger = setup_logging()
     args = st.session_state.args
 
     # Remove the logging message here since we moved it to first initialization
