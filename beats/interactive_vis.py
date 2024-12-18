@@ -17,16 +17,22 @@ from torch.utils.data import DataLoader
 import logging
 import time
 
-@st.cache_data(show_spinner=False)
-def setup_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    return logging.getLogger(__name__)
+# Move logging setup outside of cache
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
-logger = setup_logging()
+# Remove @st.cache_data from setup_logging since we don't need it anymore
+def setup_logging():
+    return logger
+
+@st.cache_resource
+def get_args():
+    """Cache command line arguments"""
+    return parse_args()
 
 if torch.cuda.is_available():
     device = 'cuda'
@@ -281,14 +287,16 @@ def add_point_to_embedding(existing_features, new_features, existing_embedding, 
     return combined_embedded[-1:]
 
 def main():
+    # Use session state to track initialization
+    if 'initialized' not in st.session_state:
+        logger.info("Starting BEATs Feature Visualization application")
+        st.session_state.initialized = True
+        st.session_state.args = get_args()
+    
     logger = setup_logging()
-    
-    logger.info("Starting BEATs Feature Visualization application")
-    
-    # Parse command line arguments
-    args = parse_args()
-    logger.info(f"Parsed arguments: {vars(args)}")
-    
+    args = st.session_state.args
+
+    # Remove the logging message here since we moved it to first initialization
     st.set_page_config(layout="wide", page_title="BEATs Feature Visualization")
     st.title("Interactive BEATs Feature Visualization")
 
@@ -352,9 +360,12 @@ def main():
 
     # Load features (cached)
     try:
-        logger.info("Attempting to load features...")
-        features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, max_samples=args.max_samples)
-        logger.info(f"Successfully loaded {len(features)} features")
+        if 'features_loaded' not in st.session_state:
+            logger.info("Attempting to load features...")
+            features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, max_samples=args.max_samples)
+            st.session_state.features_loaded = True
+        else:
+            features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, max_samples=args.max_samples)
     except Exception as e:
         logger.error(f"Error loading features: {str(e)}", exc_info=True)
         st.error(f"Error loading features: {str(e)}")
