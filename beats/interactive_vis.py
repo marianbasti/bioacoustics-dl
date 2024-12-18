@@ -17,13 +17,16 @@ from torch.utils.data import DataLoader
 import logging
 import time
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+@st.cache_data(show_spinner=False)
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
 
 if torch.cuda.is_available():
     device = 'cuda'
@@ -278,6 +281,8 @@ def add_point_to_embedding(existing_features, new_features, existing_embedding, 
     return combined_embedded[-1:]
 
 def main():
+    logger = setup_logging()
+    
     logger.info("Starting BEATs Feature Visualization application")
     
     # Parse command line arguments
@@ -355,29 +360,21 @@ def main():
         st.error(f"Error loading features: {str(e)}")
         return
 
-    # Initialize session state for plots
-    if 'fig_tsne' not in st.session_state:
-        st.session_state.fig_tsne = None
-    if 'fig_umap' not in st.session_state:
-        st.session_state.fig_umap = None
-
     # Create two columns for visualizations
     col1, col2 = st.columns(2)
 
     with col1:
         st.header("t-SNE Visualization")
         try:
-            if st.session_state.fig_tsne is None:
-                start_time = time.time()
-                tsne_embedded, tsne_params = reduce_dimensions(
-                    features, 
-                    method='tsne',
-                    perplexity=perplexity
-                )
-                logger.info(f"t-SNE completed in {time.time() - start_time:.2f} seconds")
-                st.session_state.fig_tsne = create_plot(tsne_embedded, paths, metadata, 't-SNE', tsne_params, point_size)
-                st.session_state.tsne_embedded = tsne_embedded  # Store embedding for later use
-            st.plotly_chart(st.session_state.fig_tsne)
+            start_time = time.time()
+            tsne_embedded, tsne_params = reduce_dimensions(
+                features, 
+                method='tsne',
+                perplexity=perplexity
+            )
+            logger.info(f"t-SNE completed in {time.time() - start_time:.2f} seconds")
+            fig_tsne = create_plot(tsne_embedded, paths, metadata, 't-SNE', tsne_params, point_size)
+            st.plotly_chart(fig_tsne)
         except Exception as e:
             logger.error(f"Error in t-SNE: {str(e)}", exc_info=True)
             st.error(f"Error in t-SNE: {str(e)}")
@@ -385,18 +382,16 @@ def main():
     with col2:
         st.header("UMAP Visualization")
         try:
-            if st.session_state.fig_umap is None:
-                start_time = time.time()
-                umap_embedded, umap_params = reduce_dimensions(
-                    features,
-                    method='umap',
-                    n_neighbors=n_neighbors,
-                    min_dist=min_dist
-                )
-                logger.info(f"UMAP completed in {time.time() - start_time:.2f} seconds")
-                st.session_state.fig_umap = create_plot(umap_embedded, paths, metadata, 'UMAP', umap_params, point_size)
-                st.session_state.umap_embedded = umap_embedded  # Store embedding for later use
-            st.plotly_chart(st.session_state.fig_umap)
+            start_time = time.time()
+            umap_embedded, umap_params = reduce_dimensions(
+                features,
+                method='umap',
+                n_neighbors=n_neighbors,
+                min_dist=min_dist
+            )
+            logger.info(f"UMAP completed in {time.time() - start_time:.2f} seconds")
+            fig_umap = create_plot(umap_embedded, paths, metadata, 'UMAP', umap_params, point_size)
+            st.plotly_chart(fig_umap)
         except Exception as e:
             logger.error(f"Error in UMAP: {str(e)}", exc_info=True)
             st.error(f"Error in UMAP: {str(e)}")
