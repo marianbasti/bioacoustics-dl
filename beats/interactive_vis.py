@@ -355,8 +355,6 @@ def process_dropped_file(uploaded_file, model, device):
         dataset = AudioDataset(
             root_dir="./temp",
             max_segments_per_file=1,
-            sample_rate=16000,  # Explicitly set sample rate
-            num_workers=4  # Disable multiprocessing
         )
         dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
         
