@@ -252,23 +252,27 @@ def create_seasonal_colorscale():
 def reduce_dimensions_3d(features, method, **params):
     """Reduce dimensions using the same method twice - once for 2D and once for 1D"""
     # Get 2D embedding using specified method
-    embedded_2d, params_str = reduce_dimensions(features, method=method, **params)
-    
-    # Get third dimension using same method but with n_components=1
     if method == 'tsne':
         from sklearn.manifold import TSNE
+        reducer_2d = TSNE(n_components=2, **params)
         reducer_1d = TSNE(n_components=1, **params)
-        third_dim = reducer_1d.fit_transform(features).flatten()
     elif method == 'umap':
         import umap
+        reducer_2d = umap.UMAP(n_components=2, **params)
         reducer_1d = umap.UMAP(n_components=1, **params)
-        third_dim = reducer_1d.fit_transform(features).flatten()
+    
+    embedded_2d = reducer_2d.fit_transform(features)
+    third_dim = reducer_1d.fit_transform(features).flatten()
+    
+    # Store reducers in session state for reuse with new points
+    if 'reducers' not in st.session_state:
+        st.session_state.reducers = {}
+    st.session_state.reducers[f'{method}_2d'] = reducer_2d
+    st.session_state.reducers[f'{method}_1d'] = reducer_1d
     
     # Combine 2D embedding with third dimension
     embedded_3d = np.column_stack((embedded_2d, third_dim))
-    
-    # Update params string
-    params_str += f", {method.upper()}-3rd-dim"
+    params_str = f"{method.upper()}-3D"
     
     return embedded_3d, params_str
 
@@ -362,16 +366,23 @@ def update_plot_with_new_point(fig, new_point_coords, point_size):
     return fig
 
 def add_point_to_embedding(existing_features, new_features, existing_embedding, method, **params):
-    """Combine existing and new features, then perform dimension reduction"""
-    # Combine the features
-    combined_features = np.vstack([existing_features, new_features])
-    
-    # Perform 3D dimension reduction on combined features
-    combined_embedded, _ = reduce_dimensions_3d(combined_features, method=method, **params)
-    
-    # Return all new points' coordinates (last n rows, where n is the number of new features)
-    n_new_points = len(new_features)
-    return combined_embedded[-n_new_points:]
+    """Project new points using the stored transformation"""
+    if method == 'tsne':
+        # For t-SNE, we need to do a new fit since it doesn't support transform
+        # We'll combine old and new data to maintain consistency
+        combined_features = np.vstack([existing_features, new_features])
+        combined_embedded, _ = reduce_dimensions_3d(combined_features, method=method, **params)
+        return combined_embedded[-len(new_features):]
+    elif method == 'umap':
+        # UMAP supports transform, so we can use the stored model
+        reducer_2d = st.session_state.reducers[f'{method}_2d']
+        reducer_1d = st.session_state.reducers[f'{method}_1d']
+        
+        # Transform new points using stored models
+        new_2d = reducer_2d.transform(new_features)
+        new_1d = reducer_1d.transform(new_features).flatten()
+        
+        return np.column_stack((new_2d, new_1d))
 
 def process_multiple_files(uploaded_files, model, device):
     """Process multiple uploaded audio files at once and extract features"""
