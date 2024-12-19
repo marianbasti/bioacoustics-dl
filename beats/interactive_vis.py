@@ -250,16 +250,7 @@ def create_seasonal_colorscale():
     ]
 
 def reduce_dimensions_3d(features, method, **params):
-    """Reduce dimensions using PCA first, then the specified method"""
-    # Apply PCA preprocessing if enabled
-    if st.session_state.get('use_pca', True):
-        pca = PCA(n_components=st.session_state.get('n_components', 20))
-        features = pca.fit_transform(features)
-        # Store explained variance ratio in session state for display
-        st.session_state.explained_variance_ratio = pca.explained_variance_ratio_.sum()
-        # Store PCA model for new points
-        st.session_state.pca_model = pca
-    
+    """Reduce dimensions using the same method twice - once for 2D and once for 1D"""
     # Get 2D embedding using specified method
     if method == 'tsne':
         from sklearn.manifold import TSNE
@@ -282,8 +273,6 @@ def reduce_dimensions_3d(features, method, **params):
     # Combine 2D embedding with third dimension
     embedded_3d = np.column_stack((embedded_2d, third_dim))
     params_str = f"{method.upper()}-3D"
-    if st.session_state.get('use_pca', True):
-        params_str += f" (PCA-{st.session_state.get('n_components', 20)})"
     
     return embedded_3d, params_str
 
@@ -378,10 +367,6 @@ def update_plot_with_new_point(fig, new_point_coords, point_size):
 
 def add_point_to_embedding(existing_features, new_features, existing_embedding, method, **params):
     """Project new points using the stored transformation"""
-    # Apply PCA transformation if enabled
-    if st.session_state.get('use_pca', True) and 'pca_model' in st.session_state:
-        new_features = st.session_state.pca_model.transform(new_features)
-    
     if method == 'tsne':
         # For t-SNE, we need to do a new fit since it doesn't support transform
         # We'll combine old and new data to maintain consistency
@@ -434,6 +419,7 @@ def process_multiple_files(uploaded_files, model, device):
 def main():
     logger = setup_logging()
     st.set_page_config(layout="wide", page_title="BEATs Feature Visualization")
+    # Use session state to track initialization
     if 'initialized' not in st.session_state:
         logger.info("Starting BEATs Feature Visualization application")
         st.session_state.initialized = True
@@ -441,6 +427,7 @@ def main():
     
     args = st.session_state.args
 
+    # Remove the logging message here since we moved it to first initialization
     st.title("Interactive BEATs Feature Visualization")
 
     # Sidebar for input parameters
@@ -463,23 +450,6 @@ def main():
             help="Number of samples processed together. Higher values use more memory but may be faster"
         )
         
-        st.divider()
-        st.header("PCA Preprocessing")
-        use_pca = st.checkbox(
-            "Apply PCA preprocessing",
-            value=True,
-            help="Reduce dimensions using PCA before applying t-SNE/UMAP"
-        )
-        n_components = st.slider(
-            "PCA Components",
-            min_value=1,
-            max_value=50,
-            value=20,
-            help="Number of PCA components to keep. Original feature dimension will be reduced to this number"
-        )
-        st.markdown(f"*Using {n_components} components will capture approximately "
-                   f"{st.session_state.get('explained_variance_ratio', 0.0):.1%} of the variance.*")
-
         st.divider()
         st.header("t-SNE Parameters")
         perplexity = st.slider(
