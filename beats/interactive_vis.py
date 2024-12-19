@@ -362,7 +362,7 @@ def update_plot_with_new_point(fig, new_point_coords, seasonal_value, point_size
         go.Scatter3d(
             x=[new_point_coords[0]],
             y=[new_point_coords[1]],
-            z=[seasonal_value],
+            z=[new_point_coords[2]],  # Use the actual third dimension instead of seasonal_value
             mode='markers',
             marker=dict(
                 color='white',
@@ -514,6 +514,12 @@ def main():
             logger.error(f"Error in UMAP: {str(e)}", exc_info=True)
             st.error(f"Error in UMAP: {str(e)}")
 
+    # Initialize lists to store new points if not already in session state
+    if 'new_tsne_points' not in st.session_state:
+        st.session_state.new_tsne_points = []
+    if 'new_umap_points' not in st.session_state:
+        st.session_state.new_umap_points = []
+
     # Create drag-and-drop area
     st.markdown("### Drag and Drop Audio Files")
     uploaded_files = st.file_uploader(
@@ -545,13 +551,18 @@ def main():
                     perplexity=perplexity
                 )
                 
-                # Update t-SNE plot
-                updated_tsne_fig = update_plot_with_new_point(
-                    st.session_state.fig_tsne, 
-                    new_tsne_point[0],
-                    0,  # seasonal value (you might want to calculate this)
-                    point_size
-                )
+                # Add new point to session state
+                st.session_state.new_tsne_points.append(new_tsne_point[0])
+                
+                # Update t-SNE plot with all accumulated points
+                updated_tsne_fig = st.session_state.fig_tsne
+                for point in st.session_state.new_tsne_points:
+                    updated_tsne_fig = update_plot_with_new_point(
+                        updated_tsne_fig, 
+                        point,
+                        None,
+                        point_size
+                    )
                 st.session_state.fig_tsne = updated_tsne_fig
                 st.plotly_chart(updated_tsne_fig)
                 
@@ -565,13 +576,18 @@ def main():
                     min_dist=min_dist
                 )
                 
-                # Update UMAP plot
-                updated_umap_fig = update_plot_with_new_point(
-                    st.session_state.fig_umap, 
-                    new_umap_point[0],
-                    0,  # seasonal value (you might want to calculate this)
-                    point_size
-                )
+                # Add new point to session state
+                st.session_state.new_umap_points.append(new_umap_point[0])
+                
+                # Update UMAP plot with all accumulated points
+                updated_umap_fig = st.session_state.fig_umap
+                for point in st.session_state.new_umap_points:
+                    updated_umap_fig = update_plot_with_new_point(
+                        updated_umap_fig,
+                        point,
+                        None,
+                        point_size
+                    )
                 st.session_state.fig_umap = updated_umap_fig
                 st.plotly_chart(updated_umap_fig)
                 
