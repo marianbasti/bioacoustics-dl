@@ -457,7 +457,7 @@ def main():
             "Point Size",
             min_value=1,
             max_value=12,
-            value=8,
+            value=2,
             help="Size of the points in the scatter plots"
         )
 
