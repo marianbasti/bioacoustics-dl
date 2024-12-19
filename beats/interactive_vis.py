@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+@st.cache_resource
+def get_args():
+    """Cache command line arguments"""
+    return parse_args()
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Interactive BEATs Feature Visualization')
     parser.add_argument('--data_dir', type=str, default="path/to/audio/files")
