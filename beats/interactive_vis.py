@@ -383,8 +383,8 @@ def add_point_to_embedding(existing_features, new_features, existing_embedding, 
     # Combine the features
     combined_features = np.vstack([existing_features, new_features])
     
-    # Perform dimension reduction on combined features
-    combined_embedded, _ = reduce_dimensions(combined_features, method=method, **params)
+    # Perform 3D dimension reduction on combined features
+    combined_embedded, _ = reduce_dimensions_3d(combined_features, method=method, **params)
     
     # Return only the new point's coordinates (last row)
     return combined_embedded[-1:]
