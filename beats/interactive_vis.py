@@ -369,8 +369,9 @@ def add_point_to_embedding(existing_features, new_features, existing_embedding, 
     # Perform 3D dimension reduction on combined features
     combined_embedded, _ = reduce_dimensions_3d(combined_features, method=method, **params)
     
-    # Return only the new point's coordinates (last row)
-    return combined_embedded[-1:]
+    # Return all new points' coordinates (last n rows, where n is the number of new features)
+    n_new_points = len(new_features)
+    return combined_embedded[-n_new_points:]
 
 def process_multiple_files(uploaded_files, model, device):
     """Process multiple uploaded audio files at once and extract features"""
