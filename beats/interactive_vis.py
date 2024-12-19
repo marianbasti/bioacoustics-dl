@@ -472,7 +472,7 @@ def main():
         )
         n_components = st.slider(
             "PCA Components",
-            min_value=10,
+            min_value=1,
             max_value=50,
             value=20,
             help="Number of PCA components to keep. Original feature dimension will be reduced to this number"
