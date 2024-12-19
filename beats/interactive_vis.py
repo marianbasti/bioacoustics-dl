@@ -338,35 +338,6 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
     
     return fig
 
-def process_dropped_file(uploaded_file, model, device):
-    """Process a single uploaded audio file and extract features"""
-    import librosa  # Move import here to avoid multiprocessing issues
-    
-    # Create temp directory if it doesn't exist
-    os.makedirs("./temp", exist_ok=True)
-    
-    # Save uploaded file temporarily
-    temp_path = f"./temp/temp_{uploaded_file.name}"
-    with open(temp_path, "wb") as f:
-        f.write(uploaded_file.getvalue())
-    
-    try:
-        # Create temporary dataset with single file
-        dataset = AudioDataset(
-            root_dir="./temp",
-            max_segments_per_file=1,
-        )
-        dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-        
-        # Extract features
-        features, _, metadata = extract_features(model, dataloader, device)
-        
-        return features.cpu().numpy(), metadata[0]
-    finally:
-        # Cleanup
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-
 def update_plot_with_new_point(fig, new_point_coords, point_size):
     """Add a new point to the existing 3D plot"""
     new_trace = go.Scatter3d(
@@ -400,6 +371,38 @@ def add_point_to_embedding(existing_features, new_features, existing_embedding, 
     
     # Return only the new point's coordinates (last row)
     return combined_embedded[-1:]
+
+def process_multiple_files(uploaded_files, model, device):
+    """Process multiple uploaded audio files at once and extract features"""
+    
+    # Create temp directory if it doesn't exist
+    temp_dir = "./temp"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    try:
+        # Save all uploaded files temporarily
+        for uploaded_file in uploaded_files:
+            temp_path = os.path.join(temp_dir, uploaded_file.name)
+            with open(temp_path, "wb") as f:
+                f.write(uploaded_file.getvalue())
+        
+        # Create dataset with all uploaded files
+        dataset = AudioDataset(
+            root_dir=temp_dir,
+            max_segments_per_file=1,
+        )
+        dataloader = DataLoader(dataset, batch_size=len(uploaded_files), shuffle=False)
+        
+        # Extract features
+        features, _, metadata = extract_features(model, dataloader, device)
+        
+        return features.cpu().numpy(), metadata
+    
+    finally:
+        # Cleanup
+        import shutil
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
 
 def main():
     logger = setup_logging()
@@ -549,56 +552,57 @@ def main():
         
         col1, col2 = st.columns(2)
         
-        for uploaded_file in uploaded_files:
-            logger.info(f"Processing uploaded file: {uploaded_file.name}")
-            
-            try:
-                with st.spinner(f'Processing {uploaded_file.name}...'):
-                    # Extract features from new file
-                    new_features, new_metadata = process_dropped_file(uploaded_file, model, device)
-                    
-                    # Update t-SNE plot
-                    with col1:
-                        new_tsne_point = add_point_to_embedding(
-                            features,
-                            new_features,
-                            st.session_state.tsne_embedded,
-                            'tsne',
-                            perplexity=perplexity
-                        )
-                        st.session_state.new_tsne_points.append(new_tsne_point[0])
+        try:
+            with st.spinner('Processing uploaded files...'):
+                # Extract features from all new files at once
+                new_features, new_metadata = process_multiple_files(uploaded_files, model, device)
+                
+                # Update t-SNE plot
+                with col1:
+                    new_tsne_points = add_point_to_embedding(
+                        features,
+                        new_features,
+                        st.session_state.tsne_embedded,
+                        'tsne',
+                        perplexity=perplexity
+                    )
+                    st.session_state.new_tsne_points.extend(new_tsne_points)
+                    updated_tsne_fig = st.session_state.fig_tsne
+                    for point in new_tsne_points:
                         updated_tsne_fig = update_plot_with_new_point(
-                            st.session_state.fig_tsne,
-                            new_tsne_point[0],
+                            updated_tsne_fig,
+                            point,
                             point_size
                         )
-                        st.session_state.fig_tsne = updated_tsne_fig
-                        st.plotly_chart(updated_tsne_fig, use_container_width=True)
-                    
-                    # Update UMAP plot
-                    with col2:
-                        new_umap_point = add_point_to_embedding(
-                            features,
-                            new_features,
-                            st.session_state.umap_embedded,
-                            'umap',
-                            n_neighbors=n_neighbors,
-                            min_dist=min_dist
-                        )
-                        st.session_state.new_umap_points.append(new_umap_point[0])
+                    st.session_state.fig_tsne = updated_tsne_fig
+                    st.plotly_chart(updated_tsne_fig, use_container_width=True)
+                
+                # Update UMAP plot
+                with col2:
+                    new_umap_points = add_point_to_embedding(
+                        features,
+                        new_features,
+                        st.session_state.umap_embedded,
+                        'umap',
+                        n_neighbors=n_neighbors,
+                        min_dist=min_dist
+                    )
+                    st.session_state.new_umap_points.extend(new_umap_points)
+                    updated_umap_fig = st.session_state.fig_umap
+                    for point in new_umap_points:
                         updated_umap_fig = update_plot_with_new_point(
-                            st.session_state.fig_umap,
-                            new_umap_point[0],
+                            updated_umap_fig,
+                            point,
                             point_size
                         )
-                        st.session_state.fig_umap = updated_umap_fig
-                        st.plotly_chart(updated_umap_fig, use_container_width=True)
-                
-                st.success(f"Successfully processed {uploaded_file.name}")
-                
-            except Exception as e:
-                logger.error(f"Error processing file {uploaded_file.name}: {str(e)}", exc_info=True)
-                st.error(f"Error processing file {uploaded_file.name}: {str(e)}")
+                    st.session_state.fig_umap = updated_umap_fig
+                    st.plotly_chart(updated_umap_fig, use_container_width=True)
+            
+            st.success(f"Successfully processed {len(uploaded_files)} files")
+            
+        except Exception as e:
+            logger.error(f"Error processing files: {str(e)}", exc_info=True)
+            st.error(f"Error processing files: {str(e)}")
 
     st.divider()
     create_feature_analysis_tab(features, paths, metadata)
