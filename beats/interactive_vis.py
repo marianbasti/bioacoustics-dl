@@ -340,6 +340,12 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
         height=700,
     )
     
+    # Add plot objects to session state for reuse
+    if method == 't-SNE':
+        st.session_state.tsne_plot = fig
+    else:
+        st.session_state.umap_plot = fig
+    
     return fig
 
 def update_plot_with_new_point(fig, new_point_coords, point_size):
@@ -363,6 +369,11 @@ def update_plot_with_new_point(fig, new_point_coords, point_size):
     )
     
     fig.add_trace(new_trace)
+    fig.update_layout(scene=dict(camera=dict(
+        up=dict(x=0, y=0, z=1),
+        center=dict(x=0, y=0, z=0),
+        eye=dict(x=1.5, y=1.5, z=1.5)
+    )))
     return fig
 
 def add_point_to_embedding(existing_features, new_features, existing_embedding, method, **params):
@@ -579,15 +590,18 @@ def main():
                         perplexity=perplexity
                     )
                     st.session_state.new_tsne_points.extend(new_tsne_points)
-                    updated_tsne_fig = st.session_state.fig_tsne
-                    for point in new_tsne_points:
-                        updated_tsne_fig = update_plot_with_new_point(
-                            updated_tsne_fig,
-                            point,
-                            point_size
-                        )
-                    st.session_state.fig_tsne = updated_tsne_fig
-                    st.plotly_chart(updated_tsne_fig, use_container_width=True)
+                    
+                    # Reuse existing plot from session state
+                    if 'tsne_plot' in st.session_state:
+                        fig_tsne = st.session_state.tsne_plot
+                        for point in new_tsne_points:
+                            fig_tsne = update_plot_with_new_point(
+                                fig_tsne,
+                                point,
+                                point_size
+                            )
+                        st.session_state.tsne_plot = fig_tsne
+                        st.plotly_chart(fig_tsne, use_container_width=True)
                 
                 # Update UMAP plot
                 with col2:
@@ -600,15 +614,18 @@ def main():
                         min_dist=min_dist
                     )
                     st.session_state.new_umap_points.extend(new_umap_points)
-                    updated_umap_fig = st.session_state.fig_umap
-                    for point in new_umap_points:
-                        updated_umap_fig = update_plot_with_new_point(
-                            updated_umap_fig,
-                            point,
-                            point_size
-                        )
-                    st.session_state.fig_umap = updated_umap_fig
-                    st.plotly_chart(updated_umap_fig, use_container_width=True)
+                    
+                    # Reuse existing plot from session state
+                    if 'umap_plot' in st.session_state:
+                        fig_umap = st.session_state.umap_plot
+                        for point in new_umap_points:
+                            fig_umap = update_plot_with_new_point(
+                                fig_umap,
+                                point,
+                                point_size
+                            )
+                        st.session_state.umap_plot = fig_umap
+                        st.plotly_chart(fig_umap, use_container_width=True)
             
             st.success(f"Successfully processed {len(uploaded_files)} files")
             
