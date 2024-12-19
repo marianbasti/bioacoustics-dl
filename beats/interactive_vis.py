@@ -250,31 +250,23 @@ def create_seasonal_colorscale():
     ]
 
 def reduce_dimensions_3d(features, method, **params):
-    """Reduce dimensions using the same method twice - once for 2D and once for 1D"""
-    # Get 2D embedding using specified method
+    """Reduce dimensions to 3D in one step instead of separate 2D+1D"""
     if method == 'tsne':
         from sklearn.manifold import TSNE
-        reducer_2d = TSNE(n_components=2, **params)
-        reducer_1d = TSNE(n_components=1, **params)
+        reducer = TSNE(n_components=3, **params)
     elif method == 'umap':
         import umap
-        reducer_2d = umap.UMAP(n_components=2, **params)
-        reducer_1d = umap.UMAP(n_components=1, **params)
+        reducer = umap.UMAP(n_components=3, **params)
     
-    embedded_2d = reducer_2d.fit_transform(features)
-    third_dim = reducer_1d.fit_transform(features).flatten()
+    embedded = reducer.fit_transform(features)
     
-    # Store reducers in session state for reuse with new points
+    # Store reducer in session state for reuse
     if 'reducers' not in st.session_state:
         st.session_state.reducers = {}
-    st.session_state.reducers[f'{method}_2d'] = reducer_2d
-    st.session_state.reducers[f'{method}_1d'] = reducer_1d
+    st.session_state.reducers[method] = reducer
     
-    # Combine 2D embedding with third dimension
-    embedded_3d = np.column_stack((embedded_2d, third_dim))
     params_str = f"{method.upper()}-3D"
-    
-    return embedded_3d, params_str
+    return embedded, params_str
 
 def create_plot(embedded, paths, metadata, method, params_str, point_size):
     """Create an interactive 3D scatter plot using plotly"""
@@ -368,21 +360,18 @@ def update_plot_with_new_point(fig, new_point_coords, point_size):
 def add_point_to_embedding(existing_features, new_features, existing_embedding, method, **params):
     """Project new points using the stored transformation"""
     if method == 'tsne':
-        # For t-SNE, we need to do a new fit since it doesn't support transform
-        # We'll combine old and new data to maintain consistency
+        # For t-SNE, we need to refit with both old and new points to maintain consistency
+        from sklearn.manifold import TSNE
         combined_features = np.vstack([existing_features, new_features])
-        combined_embedded, _ = reduce_dimensions_3d(combined_features, method=method, **params)
-        return combined_embedded[-len(new_features):]
+        reducer = TSNE(n_components=3, **params)
+        combined_embedding = reducer.fit_transform(combined_features)
+        # Return both full embedding and new points
+        return combined_embedding, combined_embedding[-len(new_features):]
     elif method == 'umap':
         # UMAP supports transform, so we can use the stored model
-        reducer_2d = st.session_state.reducers[f'{method}_2d']
-        reducer_1d = st.session_state.reducers[f'{method}_1d']
-        
-        # Transform new points using stored models
-        new_2d = reducer_2d.transform(new_features)
-        new_1d = reducer_1d.transform(new_features).flatten()
-        
-        return np.column_stack((new_2d, new_1d))
+        reducer = st.session_state.reducers[method]
+        new_embedding = reducer.transform(new_features)
+        return existing_embedding, new_embedding
 
 def process_multiple_files(uploaded_files, model, device):
     """Process multiple uploaded audio files at once and extract features"""
@@ -571,27 +560,23 @@ def main():
                 
                 # Update t-SNE plot
                 with col1:
-                    new_tsne_points = add_point_to_embedding(
+                    full_tsne_embedded, new_tsne_points = add_point_to_embedding(
                         features,
                         new_features,
                         st.session_state.tsne_embedded,
                         'tsne',
                         perplexity=perplexity
                     )
-                    st.session_state.new_tsne_points.extend(new_tsne_points)
-                    updated_tsne_fig = st.session_state.fig_tsne
-                    for point in new_tsne_points:
-                        updated_tsne_fig = update_plot_with_new_point(
-                            updated_tsne_fig,
-                            point,
-                            point_size
-                        )
-                    st.session_state.fig_tsne = updated_tsne_fig
-                    st.plotly_chart(updated_tsne_fig, use_container_width=True)
+                    # Update the full embedding in session state
+                    st.session_state.tsne_embedded = full_tsne_embedded
+                    # Create new plot with full embedding
+                    fig_tsne = create_plot(full_tsne_embedded, paths + [f.name for f in uploaded_files], 
+                                         metadata + new_metadata, 't-SNE', 'Updated t-SNE', point_size)
+                    st.plotly_chart(fig_tsne)
                 
-                # Update UMAP plot
+                # Update UMAP plot (similar changes)
                 with col2:
-                    new_umap_points = add_point_to_embedding(
+                    full_umap_embedded, new_umap_points = add_point_to_embedding(
                         features,
                         new_features,
                         st.session_state.umap_embedded,
@@ -599,16 +584,10 @@ def main():
                         n_neighbors=n_neighbors,
                         min_dist=min_dist
                     )
-                    st.session_state.new_umap_points.extend(new_umap_points)
-                    updated_umap_fig = st.session_state.fig_umap
-                    for point in new_umap_points:
-                        updated_umap_fig = update_plot_with_new_point(
-                            updated_umap_fig,
-                            point,
-                            point_size
-                        )
-                    st.session_state.fig_umap = updated_umap_fig
-                    st.plotly_chart(updated_umap_fig, use_container_width=True)
+                    st.session_state.umap_embedded = full_umap_embedded
+                    fig_umap = create_plot(full_umap_embedded, paths + [f.name for f in uploaded_files],
+                                         metadata + new_metadata, 'UMAP', 'Updated UMAP', point_size)
+                    st.plotly_chart(fig_umap)
             
             st.success(f"Successfully processed {len(uploaded_files)} files")
             
