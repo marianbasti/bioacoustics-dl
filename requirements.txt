@@ -12,3 +12,4 @@ streamlit
 plotly
 pandas
 seaborn
+librosa
