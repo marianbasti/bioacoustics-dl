@@ -2,7 +2,6 @@ import streamlit as st
 import torch
 import plotly.express as px
 import pandas as pd
-from vis import prepare_features, reduce_dimensions
 import numpy as np
 import argparse
 import re
@@ -12,15 +11,14 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from dataset import AudioDataset
-from vis import extract_features, load_trained_model
+from vis import extract_features, load_trained_model, prepare_features, reduce_dimensions
 from torch.utils.data import DataLoader
 import logging
 import time
 import os
 
-os.environ["NUMBA_CACHE_DIR"] = "/tmp/numba_cache"  # Add at the very top
+os.environ["NUMBA_CACHE_DIR"] = "/tmp/numba_cache"
 
-# Move logging setup outside of cache
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -28,75 +26,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Remove @st.cache_data from setup_logging since we don't need it anymore
-def setup_logging():
-    return logger
-
-@st.cache_resource
-def get_args():
-    """Cache command line arguments"""
-    return parse_args()
-
-if torch.cuda.is_available():
-    device = 'cuda'
-else:
-    device = 'cpu'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Interactive BEATs Feature Visualization')
-    parser.add_argument('--data_dir', type=str, default="path/to/audio/files",
-                      help='Directory containing the audio files')
-    parser.add_argument('--checkpoint_path', type=str, default="path/to/checkpoint.pt",
-                      help='Path to the trained BEATs model checkpoint')
-    parser.add_argument('--max_samples', type=int, default=None,
-                      help='Set a maximum amount of samples to load')
+    parser.add_argument('--data_dir', type=str, default="path/to/audio/files")
+    parser.add_argument('--checkpoint_path', type=str, default="path/to/checkpoint.pt")
+    parser.add_argument('--max_samples', type=int, default=None)
     return parser.parse_args()
 
 def analyze_features(features):
-    """Perform statistical analysis of features"""
-    # PCA Analysis
     pca = PCA()
     scaled_features = StandardScaler().fit_transform(features)
     pca_result = pca.fit_transform(scaled_features)
-    
-    # Explained variance
-    exp_var_ratio = pca.explained_variance_ratio_
-    cum_sum_eigenvalues = np.cumsum(exp_var_ratio)
-    
-    return pca_result, exp_var_ratio, cum_sum_eigenvalues
+    return pca_result, pca.explained_variance_ratio_, np.cumsum(pca.explained_variance_ratio_)
 
 @st.cache_data
 def parse_training_log(checkpoint_path):
-    """Parse training log file to extract loss values"""
     log_path = os.path.join(os.path.dirname(checkpoint_path), 'training.log')
-    if not os.path.exists(log_path):
-        return None
+    if not os.path.exists(log_path): return None
     
-    epochs = []
-    batches = []
-    losses = []
-    
+    data = {'epoch': [], 'batch': [], 'loss': []}
     with open(log_path, 'r') as f:
         for line in f:
             if 'Epoch' in line and 'Loss:' in line:
-                try:
-                    # Extract values using regex
-                    epoch_match = re.search(r'Epoch (\d+)', line)
-                    batch_match = re.search(r'Batch (\d+)', line)
-                    loss_match = re.search(r'Loss: ([\d.]+)', line)
-                    
-                    if epoch_match and batch_match and loss_match:
-                        epochs.append(int(epoch_match.group(1)))
-                        batches.append(int(batch_match.group(1)))
-                        losses.append(float(loss_match.group(1)))
-                except:
-                    continue
+                matches = {
+                    'epoch': re.search(r'Epoch (\d+)', line),
+                    'batch': re.search(r'Batch (\d+)', line),
+                    'loss': re.search(r'Loss: ([\d.]+)', line)
+                }
+                if all(matches.values()):
+                    data['epoch'].append(int(matches['epoch'].group(1)))
+                    data['batch'].append(int(matches['batch'].group(1)))
+                    data['loss'].append(float(matches['loss'].group(1)))
     
-    return pd.DataFrame({
-        'epoch': epochs,
-        'batch': batches,
-        'loss': losses
-    })
+    return pd.DataFrame(data)
 
 def create_feature_analysis_tab(features, paths, metadata):
     """Create additional analysis visualizations"""
@@ -203,13 +167,7 @@ def create_feature_analysis_tab(features, paths, metadata):
 
 @st.cache_data
 def load_features(data_dir, checkpoint_path, batch_size, max_samples=None):
-    """Cache the feature extraction to avoid recomputing"""
-    logger.info(f"Loading features from {data_dir}")
     start_time = time.time()
-    
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
-    # Create dataset
     dataset = AudioDataset(
         root_dir=data_dir,
         segment_duration=10,
@@ -218,73 +176,66 @@ def load_features(data_dir, checkpoint_path, batch_size, max_samples=None):
         random_segments=True,
         max_samples=max_samples
     )
-        
+    
     features, paths, metadata = prepare_features(dataset, checkpoint_path, batch_size, device)
     if isinstance(features, torch.Tensor):
         features = features.numpy()
     
-    logger.info(f"Features loaded successfully in {time.time() - start_time:.2f} seconds")
+    logger.info(f"Features loaded in {time.time() - start_time:.2f} seconds")
     return features, paths, metadata
 
 def extract_date(filename):
-    """Extract date from filename using regex"""
     match = re.search(r'(\d{8})', filename)
-    if match:
-        return datetime.strptime(match.group(1), '%Y%m%d')
-    return None
+    return datetime.strptime(match.group(1), '%Y%m%d') if match else None
 
 def get_seasonal_color_value(date):
-    """Convert date to seasonal value (0-1) for Southern Hemisphere"""
-    day_of_year = date.timetuple().tm_yday
-    shifted_day = (day_of_year+9) % 365
-    return shifted_day / 365.0
+    return ((date.timetuple().tm_yday + 9) % 365) / 365.0
 
 def create_seasonal_colorscale():
-    """Create a custom colorscale for seasons in Southern Hemisphere"""
     return [
-        [0.0, 'rgb(255,0,0)'],     # red (summer - December 21)
-        [0.25, 'rgb(255,165,0)'],   # orange (autumn - April 21)
-        [0.5, 'rgb(0,25,255)'],   # blue (winter - July 21)
-        [0.75, 'rgb(15,255,15)'],   # green (spring - September 21)
-        [1.0, 'rgb(255,0,0)'],     # back to red (summer)
+        [0.0, 'rgb(255,0,0)'],     # summer
+        [0.25, 'rgb(255,165,0)'],  # autumn
+        [0.5, 'rgb(0,25,255)'],    # winter
+        [0.75, 'rgb(15,255,15)'],  # spring
+        [1.0, 'rgb(255,0,0)']      # summer
     ]
 
 def reduce_dimensions_3d(features, method, **params):
-    """Reduce dimensions to 3D in one step instead of separate 2D+1D"""
     if method == 'tsne':
         from sklearn.manifold import TSNE
-        reducer = TSNE(n_components=3, **params)
+        reducer_2d = TSNE(n_components=2, **params)
+        reducer_1d = TSNE(n_components=1, **params)
     elif method == 'umap':
         import umap
-        reducer = umap.UMAP(n_components=3, **params)
+        reducer_2d = umap.UMAP(n_components=2, **params)
+        reducer_1d = umap.UMAP(n_components=1, **params)
     
-    embedded = reducer.fit_transform(features)
+    embedded_2d = reducer_2d.fit_transform(features)
+    third_dim = reducer_1d.fit_transform(features).flatten()
     
-    # Store reducer in session state for reuse
     if 'reducers' not in st.session_state:
         st.session_state.reducers = {}
-    st.session_state.reducers[method] = reducer
+    st.session_state.reducers[f'{method}_2d'] = reducer_2d
+    st.session_state.reducers[f'{method}_1d'] = reducer_1d
     
+    embedded_3d = np.column_stack((embedded_2d, third_dim))
     params_str = f"{method.upper()}-3D"
-    return embedded, params_str
+    
+    return embedded_3d, params_str
 
 def create_plot(embedded, paths, metadata, method, params_str, point_size):
-    """Create an interactive 3D scatter plot using plotly"""
     df = pd.DataFrame({
         f'{method}_1': embedded[:, 0],
         f'{method}_2': embedded[:, 1],
-        f'{method}_3': embedded[:, 2],  # Now using same algorithm
+        f'{method}_3': embedded[:, 2],
     })
     
-    # Add metadata columns and extract dates
     for key in metadata[0].keys():
         df[key] = [m[key] for m in metadata]
     
-    # Extract dates and seasonal values
     df['date'] = [extract_date(path) for path in paths]
     df['seasonal_value'] = df['date'].apply(get_seasonal_color_value)
     
-    # Customize hover template
     hover_template = (
         "<b>%{customdata[0]}</b><br>"
         "Date: %{customdata[4]}<br>"
@@ -297,7 +248,7 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
     fig = go.Figure(data=[go.Scatter3d(
         x=df[f'{method}_1'],
         y=df[f'{method}_2'],
-        z=df[f'{method}_3'],  # Updated variable name
+        z=df[f'{method}_3'],
         mode='markers',
         marker=dict(
             size=point_size,
@@ -311,7 +262,7 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
             df['duration'], 
             df['num_channels'],
             df['date'].dt.strftime('%Y-%m-%d'),
-            df[f'{method}_3']  # Updated variable name
+            df[f'{method}_3']
         )),
         hovertemplate=hover_template
     )])
@@ -321,7 +272,7 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
         scene=dict(
             xaxis_title=f'{method}_1',
             yaxis_title=f'{method}_2',
-            zaxis_title=f'{method}_3',  # Updated title
+            zaxis_title=f'{method}_3',
             camera=dict(
                 up=dict(x=0, y=0, z=1),
                 center=dict(x=0, y=0, z=0),
@@ -335,7 +286,6 @@ def create_plot(embedded, paths, metadata, method, params_str, point_size):
     return fig
 
 def update_plot_with_new_point(fig, new_point_coords, point_size):
-    """Add a new point to the existing 3D plot"""
     new_trace = go.Scatter3d(
         x=[new_point_coords[0]],
         y=[new_point_coords[1]],
@@ -343,14 +293,14 @@ def update_plot_with_new_point(fig, new_point_coords, point_size):
         mode='markers',
         marker=dict(
             color='white',
-            size=point_size * 2,  # Make new points more visible
+            size=point_size * 2,
             line=dict(
                 color='red',
                 width=2
             ),
             symbol='circle'
         ),
-        name=f'New Point {len(fig.data)}',  # Unique name for each new point
+        name=f'New Point {len(fig.data)}',
         showlegend=True
     )
     
@@ -358,78 +308,61 @@ def update_plot_with_new_point(fig, new_point_coords, point_size):
     return fig
 
 def add_point_to_embedding(existing_features, new_features, existing_embedding, method, **params):
-    """Project new points using the stored transformation"""
     if method == 'tsne':
-        # For t-SNE, we need to refit with both old and new points to maintain consistency
-        from sklearn.manifold import TSNE
         combined_features = np.vstack([existing_features, new_features])
-        reducer = TSNE(n_components=3, **params)
-        combined_embedding = reducer.fit_transform(combined_features)
-        # Return both full embedding and new points
-        return combined_embedding, combined_embedding[-len(new_features):]
+        combined_embedded, _ = reduce_dimensions_3d(combined_features, method=method, **params)
+        return combined_embedded[-len(new_features):]
     elif method == 'umap':
-        # UMAP supports transform, so we can use the stored model
-        reducer = st.session_state.reducers[method]
-        new_embedding = reducer.transform(new_features)
-        return existing_embedding, new_embedding
+        reducer_2d = st.session_state.reducers[f'{method}_2d']
+        reducer_1d = st.session_state.reducers[f'{method}_1d']
+        
+        new_2d = reducer_2d.transform(new_features)
+        new_1d = reducer_1d.transform(new_features).flatten()
+        
+        return np.column_stack((new_2d, new_1d))
 
 def process_multiple_files(uploaded_files, model, device):
-    """Process multiple uploaded audio files at once and extract features"""
-    
-    # Create temp directory if it doesn't exist
     temp_dir = "./temp"
     os.makedirs(temp_dir, exist_ok=True)
     
     try:
-        # Save all uploaded files temporarily
-        for uploaded_file in uploaded_files:
-            temp_path = os.path.join(temp_dir, uploaded_file.name)
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getvalue())
+        for file in uploaded_files:
+            with open(os.path.join(temp_dir, file.name), "wb") as f:
+                f.write(file.getvalue())
         
-        # Create dataset with all uploaded files
-        dataset = AudioDataset(
-            root_dir=temp_dir,
-            max_segments_per_file=1,
-        )
+        dataset = AudioDataset(root_dir=temp_dir, max_segments_per_file=1)
         dataloader = DataLoader(dataset, batch_size=len(uploaded_files), shuffle=False)
-        
-        # Extract features
         features, _, metadata = extract_features(model, dataloader, device)
-        
         return features.cpu().numpy(), metadata
     
     finally:
-        # Cleanup
         import shutil
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
 
 def main():
-    logger = setup_logging()
-    st.set_page_config(layout="wide", page_title="BEATs Feature Visualization")
-    # Use session state to track initialization
     if 'initialized' not in st.session_state:
-        logger.info("Starting BEATs Feature Visualization application")
-        st.session_state.initialized = True
-        st.session_state.args = get_args()
+        st.session_state.update({
+            'initialized': True,
+            'args': get_args(),
+            'new_tsne_points': [],
+            'new_umap_points': []
+        })
     
-    args = st.session_state.args
-
-    # Remove the logging message here since we moved it to first initialization
+    logger = logging.getLogger(__name__)
+    st.set_page_config(layout="wide", page_title="BEATs Feature Visualization")
     st.title("Interactive BEATs Feature Visualization")
 
-    # Sidebar for input parameters
     with st.sidebar:
         st.header("Parameters")
         data_dir = st.text_input(
             "Data Directory", 
-            value=args.data_dir,
+            value=st.session_state.args.data_dir,
             help="Directory containing the audio files to analyze"
         )
         checkpoint_path = st.text_input(
             "Checkpoint Path", 
-            value=args.checkpoint_path,
+            value=st.session_state.args.checkpoint_path,
             help="Path to the pre-trained BEATs model checkpoint file (.pt)"
         )
         batch_size = st.number_input(
@@ -477,27 +410,25 @@ def main():
             help="Size of the points in the scatter plots"
         )
 
-    # Load features (cached)
     try:
         if 'features_loaded' not in st.session_state:
             logger.info("Attempting to load features...")
-            features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, max_samples=args.max_samples)
+            features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, max_samples=st.session_state.args.max_samples)
             st.session_state.features_loaded = True
         else:
-            features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, max_samples=args.max_samples)
+            features, paths, metadata = load_features(data_dir, checkpoint_path, batch_size, max_samples=st.session_state.args.max_samples)
     except Exception as e:
         logger.error(f"Error loading features: {str(e)}", exc_info=True)
         st.error(f"Error loading features: {str(e)}")
         return
 
-    # Create two columns for visualizations
     col1, col2 = st.columns(2)
 
     with col1:
         st.header("t-SNE Visualization")
         try:
             start_time = time.time()
-            tsne_embedded, tsne_params = reduce_dimensions_3d(  # Changed to 3D
+            tsne_embedded, tsne_params = reduce_dimensions_3d(
                 features, 
                 method='tsne',
                 perplexity=perplexity
@@ -515,7 +446,7 @@ def main():
         st.header("UMAP Visualization")
         try:
             start_time = time.time()
-            umap_embedded, umap_params = reduce_dimensions_3d(  # Changed to 3D
+            umap_embedded, umap_params = reduce_dimensions_3d(
                 features,
                 method='umap',
                 n_neighbors=n_neighbors,
@@ -530,13 +461,6 @@ def main():
             logger.error(f"Error in UMAP: {str(e)}", exc_info=True)
             st.error(f"Error in UMAP: {str(e)}")
 
-    # Initialize lists to store new points if not already in session state
-    if 'new_tsne_points' not in st.session_state:
-        st.session_state.new_tsne_points = []
-    if 'new_umap_points' not in st.session_state:
-        st.session_state.new_umap_points = []
-
-    # Create drag-and-drop area
     st.markdown("### Drag and Drop Audio Files")
     uploaded_files = st.file_uploader(
         "Drop audio files here to see where they appear in the feature space",
@@ -544,39 +468,39 @@ def main():
         type=['wav', 'mp3', 'ogg', 'flac']
     )
 
-    # Process uploaded files if any
     if uploaded_files:
         logger.info(f"Processing {len(uploaded_files)} uploaded files")
         model = load_trained_model(checkpoint_path)
         model.to(device)
-        model.eval()  # Ensure model is in eval mode
+        model.eval()
         
         col1, col2 = st.columns(2)
         
         try:
             with st.spinner('Processing uploaded files...'):
-                # Extract features from all new files at once
                 new_features, new_metadata = process_multiple_files(uploaded_files, model, device)
                 
-                # Update t-SNE plot
                 with col1:
-                    full_tsne_embedded, new_tsne_points = add_point_to_embedding(
+                    new_tsne_points = add_point_to_embedding(
                         features,
                         new_features,
                         st.session_state.tsne_embedded,
                         'tsne',
                         perplexity=perplexity
                     )
-                    # Update the full embedding in session state
-                    st.session_state.tsne_embedded = full_tsne_embedded
-                    # Create new plot with full embedding
-                    fig_tsne = create_plot(full_tsne_embedded, paths + [f.name for f in uploaded_files], 
-                                         metadata + new_metadata, 't-SNE', 'Updated t-SNE', point_size)
-                    st.plotly_chart(fig_tsne)
+                    st.session_state.new_tsne_points.extend(new_tsne_points)
+                    updated_tsne_fig = st.session_state.fig_tsne
+                    for point in new_tsne_points:
+                        updated_tsne_fig = update_plot_with_new_point(
+                            updated_tsne_fig,
+                            point,
+                            point_size
+                        )
+                    st.session_state.fig_tsne = updated_tsne_fig
+                    st.plotly_chart(updated_tsne_fig, use_container_width=True)
                 
-                # Update UMAP plot (similar changes)
                 with col2:
-                    full_umap_embedded, new_umap_points = add_point_to_embedding(
+                    new_umap_points = add_point_to_embedding(
                         features,
                         new_features,
                         st.session_state.umap_embedded,
@@ -584,10 +508,16 @@ def main():
                         n_neighbors=n_neighbors,
                         min_dist=min_dist
                     )
-                    st.session_state.umap_embedded = full_umap_embedded
-                    fig_umap = create_plot(full_umap_embedded, paths + [f.name for f in uploaded_files],
-                                         metadata + new_metadata, 'UMAP', 'Updated UMAP', point_size)
-                    st.plotly_chart(fig_umap)
+                    st.session_state.new_umap_points.extend(new_umap_points)
+                    updated_umap_fig = st.session_state.fig_umap
+                    for point in new_umap_points:
+                        updated_umap_fig = update_plot_with_new_point(
+                            updated_umap_fig,
+                            point,
+                            point_size
+                        )
+                    st.session_state.fig_umap = updated_umap_fig
+                    st.plotly_chart(updated_umap_fig, use_container_width=True)
             
             st.success(f"Successfully processed {len(uploaded_files)} files")
             
