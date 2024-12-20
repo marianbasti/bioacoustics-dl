@@ -250,31 +250,23 @@ def create_seasonal_colorscale():
     ]
 
 def reduce_dimensions_3d(features, method, **params):
-    """Reduce dimensions using the same method twice - once for 2D and once for 1D"""
-    # Get 2D embedding using specified method
+    """Reduce dimensions to 3D in a single transformation"""
     if method == 'tsne':
         from sklearn.manifold import TSNE
-        reducer_2d = TSNE(n_components=2, **params)
-        reducer_1d = TSNE(n_components=1, **params)
+        reducer = TSNE(n_components=3, **params)
     elif method == 'umap':
         import umap
-        reducer_2d = umap.UMAP(n_components=2, **params)
-        reducer_1d = umap.UMAP(n_components=1, **params)
+        reducer = umap.UMAP(n_components=3, **params)
     
-    embedded_2d = reducer_2d.fit_transform(features)
-    third_dim = reducer_1d.fit_transform(features).flatten()
+    embedded = reducer.fit_transform(features)
     
-    # Store reducers in session state for reuse with new points
+    # Store reducer in session state for reuse
     if 'reducers' not in st.session_state:
         st.session_state.reducers = {}
-    st.session_state.reducers[f'{method}_2d'] = reducer_2d
-    st.session_state.reducers[f'{method}_1d'] = reducer_1d
+    st.session_state.reducers[method] = reducer
     
-    # Combine 2D embedding with third dimension
-    embedded_3d = np.column_stack((embedded_2d, third_dim))
     params_str = f"{method.upper()}-3D"
-    
-    return embedded_3d, params_str
+    return embedded, params_str
 
 def create_plot(embedded, paths, metadata, method, params_str, point_size):
     """Create an interactive 3D scatter plot using plotly"""
@@ -365,24 +357,31 @@ def update_plot_with_new_point(fig, new_point_coords, point_size):
     fig.add_trace(new_trace)
     return fig
 
-def add_point_to_embedding(existing_features, new_features, existing_embedding, method, **params):
-    """Project new points using the stored transformation"""
+def add_point_to_embedding(existing_features, new_features, method, **params):
+    """Project new points into the existing embedding space"""
     if method == 'tsne':
-        # For t-SNE, we need to do a new fit since it doesn't support transform
-        # We'll combine old and new data to maintain consistency
-        combined_features = np.vstack([existing_features, new_features])
-        combined_embedded, _ = reduce_dimensions_3d(combined_features, method=method, **params)
-        return combined_embedded[-len(new_features):]
+        # For t-SNE, we'll use an approximation technique
+        from sklearn.neighbors import NearestNeighbors
+        
+        # Find k nearest neighbors in the original space
+        k = min(5, len(existing_features))
+        nbrs = NearestNeighbors(n_neighbors=k).fit(existing_features)
+        distances, indices = nbrs.kneighbors(new_features)
+        
+        # Weight by inverse distance
+        weights = 1 / (distances + 1e-10)
+        weights = weights / weights.sum(axis=1, keepdims=True)
+        
+        # Interpolate positions using weighted average of neighbor positions
+        embedded_neighbors = st.session_state[f'{method}_embedded'][indices]
+        new_positions = np.sum(embedded_neighbors * weights[..., np.newaxis], axis=1)
+        
+        return new_positions
+        
     elif method == 'umap':
-        # UMAP supports transform, so we can use the stored model
-        reducer_2d = st.session_state.reducers[f'{method}_2d']
-        reducer_1d = st.session_state.reducers[f'{method}_1d']
-        
-        # Transform new points using stored models
-        new_2d = reducer_2d.transform(new_features)
-        new_1d = reducer_1d.transform(new_features).flatten()
-        
-        return np.column_stack((new_2d, new_1d))
+        # UMAP supports transform directly
+        reducer = st.session_state.reducers[method]
+        return reducer.transform(new_features)
 
 def process_multiple_files(uploaded_files, model, device):
     """Process multiple uploaded audio files at once and extract features"""
@@ -415,6 +414,19 @@ def process_multiple_files(uploaded_files, model, device):
         import shutil
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
+
+def process_uploaded_files(uploaded_files, model, device, features, method, **params):
+    new_features, new_metadata = process_multiple_files(uploaded_files, model, device)
+    
+    # Get new point positions using the appropriate method
+    new_points = add_point_to_embedding(
+        features,
+        new_features,
+        method,
+        **params
+    )
+    
+    return new_points, new_metadata
 
 def main():
     logger = setup_logging()
