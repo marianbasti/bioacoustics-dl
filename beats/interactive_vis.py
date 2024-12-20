@@ -586,7 +586,6 @@ def main():
                     new_tsne_points = add_point_to_embedding(
                         features,
                         new_features,
-                        st.session_state.tsne_embedded,
                         'tsne',
                         perplexity=perplexity
                     )
@@ -606,7 +605,6 @@ def main():
                     new_umap_points = add_point_to_embedding(
                         features,
                         new_features,
-                        st.session_state.umap_embedded,
                         'umap',
                         n_neighbors=n_neighbors,
                         min_dist=min_dist
