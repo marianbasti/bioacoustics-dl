@@ -182,17 +182,7 @@ class AudioDataset(Dataset):
         except Exception as e:
             logger.error(f"Error processing file {file_path}: {str(e)}")
             raise
-    
-    def get_positive_batch(self, batch_size: int) -> List[Tuple[torch.Tensor, str]]:
-        """Get a batch of positive examples for contrastive learning"""
-        if not self.positive_segments:
-            return None
-            
-        indices = np.random.choice(len(self.positive_segments), 
-                                 size=min(batch_size, len(self.positive_segments)),
-                                 replace=False)
-        return [self.__getitem__(idx) for idx in indices]
-    
+
     def get_labeled_batch(self, batch_size: int) -> List[Tuple[torch.Tensor, str, List[str]]]:
         """Get a batch of labeled examples for contrastive learning"""
         if not self.labeled_segments:
