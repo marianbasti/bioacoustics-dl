@@ -81,20 +81,17 @@ def parse_training_log(checkpoint_path):
             if 'Epoch' in line and 'Loss:' in line:
                 try:
                     # Extract values using regex
-                    epoch_match = re.search(r'Epoch (\d+)', line)
-                    batch_match = re.search(r'Batch (\d+)', line)
-                    loss_match = re.search(r'Loss: ([\d.]+)', line)
+                    epoch_match = re.search(r'Epoch (\d+) completed', line)
+                    loss_match = re.search(r'Average Loss: ([\d.]+)', line)
                     
-                    if epoch_match and batch_match and loss_match:
+                    if epoch_match and loss_match:
                         epochs.append(int(epoch_match.group(1)))
-                        batches.append(int(batch_match.group(1)))
                         losses.append(float(loss_match.group(1)))
                 except:
                     continue
     
     return pd.DataFrame({
         'epoch': epochs,
-        'batch': batches,
         'loss': losses
     })
 
