@@ -149,6 +149,7 @@ class AdamW(Optimizer):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, required=True)
+    parser.add_argument("--segment_duration", type=int, required=False, default=10, help="Duration of audio segments")
     parser.add_argument("--model_path", type=str, default=None,
                       help="Path to pre-trained model (optional)")
     parser.add_argument("--batch_size", type=int, default=32)
@@ -320,7 +321,7 @@ def main():
         root_dir=args.data_dir,
         positive_dir=args.positive_dir,
         labeled_dir=args.labeled_dir,
-        segment_duration=10,
+        segment_duration=args.segment_duration,
         overlap=0.01,  # 1% overlap between segments
         max_segments_per_file=6,  # Limit segments per file
         random_segments=False  # Randomly select segments
