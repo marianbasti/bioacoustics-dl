@@ -2,6 +2,7 @@ import logging
 import torch
 import torchaudio
 import numpy as np
+import pandas as pd
 from pathlib import Path
 from typing import List, Union, Tuple, Optional
 from torch.utils.data import Dataset
@@ -20,7 +21,8 @@ class AudioDataset(Dataset):
         max_segments_per_file: Optional[int] = None,
         random_segments: bool = True,
         max_samples: Optional[int] = None,
-        positive_dir: Optional[Union[str, Path]] = None  # Directory with target sounds
+        positive_dir: Optional[Union[str, Path]] = None,  # Directory with target sounds
+        labeled_dir: Optional[Union[str, Path]] = None  # Directory with labeled sounds + CSV
     ) -> None:
         """
         Args:
@@ -32,6 +34,7 @@ class AudioDataset(Dataset):
             random_segments: Whether to randomly select segments when max_segments_per_file is set
             max_samples: Maximum number of audio files to use (None for all)
             positive_dir: Directory containing positive examples for contrastive learning
+            labeled_dir: Directory containing labeled examples and labels.csv
         """
         self.sample_rate = sample_rate
         self.segment_duration = segment_duration
@@ -76,6 +79,35 @@ class AudioDataset(Dataset):
         if self.positive_files:
             for file in self.positive_files:
                 self.positive_segments.extend(self._analyze_file(file))
+                
+        self.labeled_dir = Path(labeled_dir) if labeled_dir else None
+        self.labeled_files = []
+        self.file_labels = {}
+        self.unique_labels = set()
+        
+        if self.labeled_dir:
+            # Load labels from CSV
+            labels_file = self.labeled_dir / 'labels.csv'
+            if labels_file.exists():
+                df = pd.read_csv(labels_file)
+                for _, row in df.iterrows():
+                    filename = row['filename']
+                    labels = eval(row['labels'])  # Convert string representation of list to actual list
+                    filepath = self.labeled_dir / filename
+                    if filepath.exists():
+                        self.labeled_files.append(filepath)
+                        self.file_labels[filepath] = labels
+                        self.unique_labels.update(labels)
+                
+                logger.info(f"Found {len(self.labeled_files)} labeled files with {len(self.unique_labels)} unique labels")
+            else:
+                logger.error(f"Labels file not found: {labels_file}")
+            
+        # Create segments for labeled files
+        self.labeled_segments: List[Tuple[Path, int]] = []
+        if self.labeled_files:
+            for file in self.labeled_files:
+                self.labeled_segments.extend(self._analyze_file(file))
     
     def _analyze_file(self, file_path: Path) -> List[Tuple[Path, int]]:
         segments = []
@@ -160,3 +192,25 @@ class AudioDataset(Dataset):
                                  size=min(batch_size, len(self.positive_segments)),
                                  replace=False)
         return [self.__getitem__(idx) for idx in indices]
+    
+    def get_labeled_batch(self, batch_size: int) -> List[Tuple[torch.Tensor, str, List[str]]]:
+        """Get a batch of labeled examples for contrastive learning"""
+        if not self.labeled_segments:
+            return None
+            
+        indices = np.random.choice(len(self.labeled_segments), 
+                                 size=min(batch_size, len(self.labeled_segments)),
+                                 replace=False)
+        
+        batch = []
+        for idx in indices:
+            file_path, start_frame = self.labeled_segments[idx]
+            waveform, file_id = self.__getitem__(idx)
+            labels = self.file_labels[file_path]
+            batch.append((waveform, file_id, labels))
+            
+        return batch
+
+    def get_all_labels(self):
+        """Return set of all unique labels"""
+        return self.unique_labels

@@ -153,7 +153,7 @@ def parse_args():
                       help="Path to pre-trained model (optional)")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--output_dir", type=str, default="beats/runs")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--checkpoint_freq", type=int, default=1,
@@ -166,6 +166,8 @@ def parse_args():
                       help="Directory containing positive examples")
     parser.add_argument("--supervised_weight", type=float, default=0.3,
                       help="Weight for supervised contrastive loss")
+    parser.add_argument("--labeled_dir", type=str, default=None,
+                      help="Directory containing labeled examples and labels.csv")
     return parser.parse_args()
 
 def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None, mask=None):
@@ -236,22 +238,40 @@ def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None,
     
     return loss
 
-def supervised_contrastive_loss(features, positive_features, temperature=0.1):
+def supervised_contrastive_loss(features, labels, temperature=0.1):
     """
-    Compute supervised contrastive loss using known positive pairs
+    Compute supervised contrastive loss using multi-label data
+    Args:
+        features: tensor of shape (batch_size, feature_dim)
+        labels: list of lists containing labels for each sample
     """
     features = F.normalize(features, dim=1)
-    positive_features = F.normalize(positive_features, dim=1)
+    
+    # Create label similarity matrix
+    batch_size = len(labels)
+    label_sim = torch.zeros((batch_size, batch_size), device=features.device)
+    
+    # Two samples are similar if they share any label
+    for i in range(batch_size):
+        for j in range(batch_size):
+            if i != j and any(l in labels[j] for l in labels[i]):
+                label_sim[i, j] = 1.0
     
     # Compute similarity between all pairs
-    sim_matrix = torch.matmul(features, positive_features.T) / temperature
+    sim_matrix = torch.matmul(features, features.T) / temperature
     
-    # Each sample should be similar to its positive counterparts
-    labels = torch.arange(features.shape[0], device=features.device)
-    
-    # Compute cross entropy loss
-    loss = F.cross_entropy(sim_matrix, labels)
-    return loss
+    # For each anchor, compute loss considering samples with shared labels as positives
+    loss = 0
+    for i in range(batch_size):
+        if label_sim[i].sum() > 0:  # Only compute loss if there are positive pairs
+            pos_sim = sim_matrix[i][label_sim[i] > 0]
+            neg_sim = sim_matrix[i][label_sim[i] == 0]
+            
+            numerator = torch.logsumexp(pos_sim, dim=0)
+            denominator = torch.logsumexp(torch.cat([pos_sim, neg_sim]), dim=0)
+            loss += denominator - numerator
+            
+    return loss / batch_size if batch_size > 0 else 0
 
 def main():
     args = parse_args()
@@ -299,6 +319,7 @@ def main():
     dataset = AudioDataset(
         root_dir=args.data_dir,
         positive_dir=args.positive_dir,
+        labeled_dir=args.labeled_dir,
         segment_duration=10,
         overlap=0.01,  # 1% overlap between segments
         max_segments_per_file=6,  # Limit segments per file
@@ -339,21 +360,20 @@ def main():
             # Get global features
             global_features = torch.mean(features, dim=1)
 
-            # Get supervised loss if positive examples available
+            # Get supervised loss if labeled examples available
             supervised_loss = 0
-            if dataset.positive_segments:
-                positive_batch = dataset.get_positive_batch(args.batch_size)
-                if positive_batch:
-                    pos_audio = torch.stack([x[0] for x in positive_batch])
-                    pos_audio = pos_audio.to(accelerator.device)
+            if dataset.labeled_segments:
+                labeled_batch = dataset.get_labeled_batch(args.batch_size)
+                if labeled_batch:
+                    lab_audio = torch.stack([x[0] for x in labeled_batch]).to(accelerator.device)
+                    lab_labels = [x[2] for x in labeled_batch]
                     
-                    # Use unwrap_model here too
-                    pos_features, _ = accelerator.unwrap_model(model).extract_features(pos_audio)
-                    pos_global_features = torch.mean(pos_features, dim=1)
+                    lab_features, _ = accelerator.unwrap_model(model).extract_features(lab_audio)
+                    lab_global_features = torch.mean(lab_features, dim=1)
                     
                     supervised_loss = supervised_contrastive_loss(
-                        global_features, 
-                        pos_global_features
+                        lab_global_features, 
+                        lab_labels
                     )
 
             # Compute SSL loss (example: use features for contrastive learning)
