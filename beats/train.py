@@ -333,10 +333,8 @@ def main():
         total_loss = 0
         
         for batch_idx, (audio, _) in enumerate(dataloader):
-            if hasattr(model, 'module'):
-                features, _ = model.module.extract_features(audio, padding_mask=None)
-            else:
-                features, _ = model.extract_features(audio, padding_mask=None)
+            # Use unwrap_model when needed for method access
+            features, _ = accelerator.unwrap_model(model).extract_features(audio, padding_mask=None)
             
             # Get global features
             global_features = torch.mean(features, dim=1)
@@ -349,7 +347,8 @@ def main():
                     pos_audio = torch.stack([x[0] for x in positive_batch])
                     pos_audio = pos_audio.to(accelerator.device)
                     
-                    pos_features, _ = model.extract_features(pos_audio)
+                    # Use unwrap_model here too
+                    pos_features, _ = accelerator.unwrap_model(model).extract_features(pos_audio)
                     pos_global_features = torch.mean(pos_features, dim=1)
                     
                     supervised_loss = supervised_contrastive_loss(
