@@ -162,6 +162,10 @@ def parse_args():
                       help="Number of encoder layers when training from scratch")
     parser.add_argument("--encoder_embed_dim", type=int, default=768,
                       help="Encoder embedding dimension when training from scratch")
+    parser.add_argument("--positive_dir", type=str, default=None,
+                      help="Directory containing positive examples")
+    parser.add_argument("--supervised_weight", type=float, default=0.3,
+                      help="Weight for supervised contrastive loss")
     return parser.parse_args()
 
 def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None, mask=None):
@@ -232,6 +236,23 @@ def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None,
     
     return loss
 
+def supervised_contrastive_loss(features, positive_features, temperature=0.1):
+    """
+    Compute supervised contrastive loss using known positive pairs
+    """
+    features = F.normalize(features, dim=1)
+    positive_features = F.normalize(positive_features, dim=1)
+    
+    # Compute similarity between all pairs
+    sim_matrix = torch.matmul(features, positive_features.T) / temperature
+    
+    # Each sample should be similar to its positive counterparts
+    labels = torch.arange(features.shape[0], device=features.device)
+    
+    # Compute cross entropy loss
+    loss = F.cross_entropy(sim_matrix, labels)
+    return loss
+
 def main():
     args = parse_args()
     
@@ -277,6 +298,7 @@ def main():
     logger.info(f"Loading dataset from {args.data_dir}")
     dataset = AudioDataset(
         root_dir=args.data_dir,
+        positive_dir=args.positive_dir,
         segment_duration=10,
         overlap=0.01,  # 1% overlap between segments
         max_segments_per_file=6,  # Limit segments per file
@@ -319,9 +341,28 @@ def main():
             # Get global features
             global_features = torch.mean(features, dim=1)
 
+            # Get supervised loss if positive examples available
+            supervised_loss = 0
+            if dataset.positive_segments:
+                positive_batch = dataset.get_positive_batch(args.batch_size)
+                if positive_batch:
+                    pos_audio = torch.stack([x[0] for x in positive_batch])
+                    pos_audio = pos_audio.to(accelerator.device)
+                    
+                    pos_features, _ = model.extract_features(pos_audio)
+                    pos_global_features = torch.mean(pos_features, dim=1)
+                    
+                    supervised_loss = supervised_contrastive_loss(
+                        global_features, 
+                        pos_global_features
+                    )
+
             # Compute SSL loss (example: use features for contrastive learning)
-            loss = advanced_audio_contrastive_loss(features,memory_bank=memory_bank.get_memory())
+            contrastive_loss = advanced_audio_contrastive_loss(features,memory_bank=memory_bank.get_memory())
             
+            # Combine losses
+            loss = contrastive_loss + args.supervised_weight * supervised_loss
+
             # Scale loss by gradient accumulation steps
             loss = loss / args.gradient_accumulation_steps
             

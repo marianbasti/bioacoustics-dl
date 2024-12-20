@@ -19,7 +19,8 @@ class AudioDataset(Dataset):
         overlap: float = 0.5,
         max_segments_per_file: Optional[int] = None,
         random_segments: bool = True,
-        max_samples: Optional[int] = None
+        max_samples: Optional[int] = None,
+        positive_dir: Optional[Union[str, Path]] = None  # Directory with target sounds
     ) -> None:
         """
         Args:
@@ -30,6 +31,7 @@ class AudioDataset(Dataset):
             max_segments_per_file: Maximum segments to extract per file (None for all)
             random_segments: Whether to randomly select segments when max_segments_per_file is set
             max_samples: Maximum number of audio files to use (None for all)
+            positive_dir: Directory containing positive examples for contrastive learning
         """
         self.sample_rate = sample_rate
         self.segment_duration = segment_duration
@@ -60,6 +62,20 @@ class AudioDataset(Dataset):
         self._index_segments()
         
         logger.info(f"Total segments: {len(self.segments)}")
+        
+        self.positive_dir = Path(positive_dir) if positive_dir else None
+        self.positive_files = []
+        
+        if self.positive_dir:
+            for ext in ['*.wav', '*.mp3', '*.flac']:
+                self.positive_files.extend(self.positive_dir.rglob(ext))
+            logger.info(f"Found {len(self.positive_files)} positive examples")
+            
+        # Create segments for positive files
+        self.positive_segments: List[Tuple[Path, int]] = []
+        if self.positive_files:
+            for file in self.positive_files:
+                self.positive_segments.extend(self._analyze_file(file))
     
     def _analyze_file(self, file_path: Path) -> List[Tuple[Path, int]]:
         segments = []
@@ -134,3 +150,13 @@ class AudioDataset(Dataset):
         except Exception as e:
             logger.error(f"Error processing file {file_path}: {str(e)}")
             raise
+    
+    def get_positive_batch(self, batch_size: int) -> List[Tuple[torch.Tensor, str]]:
+        """Get a batch of positive examples for contrastive learning"""
+        if not self.positive_segments:
+            return None
+            
+        indices = np.random.choice(len(self.positive_segments), 
+                                 size=min(batch_size, len(self.positive_segments)),
+                                 replace=False)
+        return [self.__getitem__(idx) for idx in indices]
