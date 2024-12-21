@@ -295,7 +295,19 @@ def main():
     logger.info(f"Starting training with arguments: {vars(args)}")
     accelerator = Accelerator()
     
-    if args.model_path:
+    if args.labeled_dir:
+        num_classes = len(dataset.get_all_labels())
+        cfg = BEATsConfig({
+            'encoder_layers': args.encoder_layers,
+            'encoder_embed_dim': args.encoder_embed_dim, 
+            'encoder_ffn_embed_dim': args.encoder_embed_dim * 4,
+            'encoder_attention_heads': args.encoder_embed_dim // 64,
+            'input_patch_size': 16,
+            'embed_dim': 512,
+            'finetuned_model': True,  # Enable prediction head
+            'predictor_class': num_classes  # Set number of classes
+        })
+    elif args.model_path:
         logger.info(f"Loading pre-trained model from {args.model_path}")
         # Load pre-trained model
         checkpoint = torch.load(args.model_path, weights_only=True, map_location='cpu')
@@ -355,37 +367,34 @@ def main():
         total_loss = 0
         
         for batch_idx, (audio, _) in enumerate(dataloader):
-            # Use unwrap_model when needed for method access
-            features, _ = accelerator.unwrap_model(model).extract_features(audio, padding_mask=None)
-            
-            # Get global features
-            global_features = torch.mean(features, dim=1)
-
-            # Get supervised loss if labeled examples available
-            supervised_loss = 0
-            if dataset.labeled_segments:
+            if args.labeled_dir:
+                # Get both normal and labeled batches
+                features, _ = accelerator.unwrap_model(model).extract_features(audio)
+                
+                # Get supervised batch and compute supervised loss
                 labeled_batch = dataset.get_labeled_batch(args.batch_size)
                 if labeled_batch:
                     lab_audio = torch.stack([x[0] for x in labeled_batch]).to(accelerator.device)
                     lab_labels = [x[2] for x in labeled_batch]
                     
-                    lab_features, _ = accelerator.unwrap_model(model).extract_features(lab_audio)
-                    lab_global_features = torch.mean(lab_features, dim=1)
+                    lab_features, lab_logits = accelerator.unwrap_model(model).extract_features(lab_audio)
+                    supervised_loss = supervised_contrastive_loss(lab_features, lab_labels)
                     
-                    supervised_loss = supervised_contrastive_loss(
-                        lab_global_features, 
-                        lab_labels
-                    )
-
-            # Compute SSL loss (example: use features for contrastive learning)
-            contrastive_loss = advanced_audio_contrastive_loss(features,memory_bank=memory_bank.get_memory())
-            
-            # Combine losses
-            loss = contrastive_loss + args.supervised_weight * supervised_loss
+                    # Combined self-supervised + supervised loss
+                    contrastive_loss = advanced_audio_contrastive_loss(features, memory_bank=memory_bank.get_memory())
+                    loss = contrastive_loss + args.supervised_weight * supervised_loss
+                else:
+                    # Fallback to just self-supervised if no labeled batch
+                    loss = advanced_audio_contrastive_loss(features, memory_bank=memory_bank.get_memory())
+            else:
+                # Original self-supervised only path
+                features, _ = accelerator.unwrap_model(model).extract_features(audio, padding_mask=None)
+                global_features = torch.mean(features, dim=1)
+                loss = advanced_audio_contrastive_loss(features, memory_bank=memory_bank.get_memory())
 
             # Scale loss by gradient accumulation steps
             loss = loss / args.gradient_accumulation_steps
-            
+
             # Update memory bank with current batch
             memory_bank.update(global_features)
 
