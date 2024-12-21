@@ -22,6 +22,7 @@ class AudioDataset(Dataset):
         random_segments: bool = True,
         max_samples: Optional[int] = None,
         positive_dir: Optional[Union[str, Path]] = None,  # Directory with target sounds
+        negative_dir: Optional[Union[str, Path]] = None,  # Added negative_dir
         labeled_dir: Optional[Union[str, Path]] = None  # Directory with labeled sounds + CSV
     ) -> None:
         """
@@ -34,6 +35,7 @@ class AudioDataset(Dataset):
             random_segments: Whether to randomly select segments when max_segments_per_file is set
             max_samples: Maximum number of audio files to use (None for all)
             positive_dir: Directory containing positive examples for contrastive learning
+            negative_dir: Directory containing negative examples for contrastive learning
             labeled_dir: Directory containing labeled examples and labels.csv
         """
         self.sample_rate = sample_rate
@@ -80,6 +82,20 @@ class AudioDataset(Dataset):
             for file in self.positive_files:
                 self.positive_segments.extend(self._analyze_file(file))
                 
+        self.negative_dir = Path(negative_dir) if negative_dir else None
+        self.negative_files = []
+        
+        if self.negative_dir:
+            for ext in ['*.wav', '*.mp3', '*.flac']:
+                self.negative_files.extend(self.negative_dir.rglob(ext))
+            logger.info(f"Found {len(self.negative_files)} negative examples")
+            
+        # Create segments for negative files
+        self.negative_segments: List[Tuple[Path, int]] = []
+        if self.negative_files:
+            for file in self.negative_files:
+                self.negative_segments.extend(self._analyze_file(file))
+
         self.labeled_dir = Path(labeled_dir) if labeled_dir else None
         self.labeled_files = []
         self.file_labels = {}
@@ -198,6 +214,22 @@ class AudioDataset(Dataset):
             waveform, file_id = self.__getitem__(idx)
             labels = self.file_labels[file_path]
             batch.append((waveform, file_id, labels))
+            
+        return batch
+
+    def get_negative_batch(self, batch_size: int) -> List[Tuple[torch.Tensor, str]]:
+        """Get a batch of negative examples for contrastive learning"""
+        if not self.negative_segments:
+            return None
+            
+        indices = np.random.choice(len(self.negative_segments), 
+                                 size=min(batch_size, len(self.negative_segments)),
+                                 replace=False)
+        
+        batch = []
+        for idx in indices:
+            waveform, file_id = self.__getitem__(idx)
+            batch.append((waveform, file_id))
             
         return batch
 

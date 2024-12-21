@@ -169,9 +169,12 @@ def parse_args():
                       help="Weight for supervised contrastive loss")
     parser.add_argument("--labeled_dir", type=str, default=None,
                       help="Directory containing labeled examples and labels.csv")
+    parser.add_argument("--negative_dir", type=str, default=None,
+                      help="Directory containing negative examples")
     return parser.parse_args()
 
-def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None, mask=None):
+def advanced_audio_contrastive_loss(features, negative_features=None, temperature=0.1, 
+                                  memory_bank=None, mask=None):
     """
     Enhanced contrastive loss for audio features:
     - Uses time-frequency consistency
@@ -226,6 +229,20 @@ def advanced_audio_contrastive_loss(features, temperature=0.1, memory_bank=None,
         # Original symmetric loss when no memory bank is used
         loss = F.cross_entropy(sim_matrix, labels) + F.cross_entropy(sim_matrix.T, labels)
         loss = loss / 2
+    
+    # Add explicit negative examples if provided
+    if negative_features is not None:
+        negative_features = F.normalize(negative_features, dim=1)
+        neg_sim = torch.matmul(global_features, negative_features.T) / temperature
+        
+        # Combine regular similarities with negative similarities
+        combined_sim = torch.cat([sim_matrix, neg_sim], dim=1)
+        
+        # Original positives should still be predicted
+        loss = F.cross_entropy(combined_sim, labels)
+    else:
+        # Original loss computation
+        loss = F.cross_entropy(sim_matrix, labels)
     
     # Add local-global consistency if we have local features
     if local_features is not None:
@@ -332,6 +349,7 @@ def main():
     dataset = AudioDataset(
         root_dir=args.data_dir,
         positive_dir=args.positive_dir,
+        negative_dir=args.negative_dir,  # Add negative_dir
         labeled_dir=args.labeled_dir,
         segment_duration=args.segment_duration,
         overlap=0.01,  # 1% overlap between segments
@@ -390,7 +408,22 @@ def main():
                 # Original self-supervised only path
                 features, _ = accelerator.unwrap_model(model).extract_features(audio, padding_mask=None)
                 global_features = torch.mean(features, dim=1)
-                loss = advanced_audio_contrastive_loss(features, memory_bank=memory_bank.get_memory())
+                
+                # Get negative examples if available
+                negative_batch = None
+                if args.negative_dir:
+                    negative_batch = dataset.get_negative_batch(args.batch_size)
+                    if negative_batch:
+                        neg_audio = torch.stack([x[0] for x in negative_batch]).to(accelerator.device)
+                        neg_features, _ = accelerator.unwrap_model(model).extract_features(neg_audio)
+                        neg_features = torch.mean(neg_features, dim=1)
+                
+                # Compute loss with negative examples
+                loss = advanced_audio_contrastive_loss(
+                    features,
+                    negative_features=neg_features if negative_batch else None,
+                    memory_bank=memory_bank.get_memory()
+                )
 
             # Scale loss by gradient accumulation steps
             loss = loss / args.gradient_accumulation_steps
