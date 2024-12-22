@@ -125,6 +125,68 @@ La visualización interactiva incluye:
 - Análisis de componentes principales
 - Visualización de patrones temporales
 - Exploración interactiva de características
+## Entrenamiento del Modelo EAT
+
+### Preentrenamiento
+
+El modelo EAT puede ser preentrenado en datos de audio no etiquetados utilizando modelado de audio enmascarado:
+
+```bash
+./scripts/pretrain.sh \
+  --save_dir ./checkpoints/pretrain \
+  --data_dir ./data/unlabeled \
+  --cuda "0,1,2,3" \
+  --batch_size 12 \
+  --world_size 4 \
+  --target_length 1024 \
+  --mask_ratio 0.75 \
+  --num_updates 400000 \
+  --learning_rate 1.5e-4 \
+  --update_freq 1
+```
+
+Principales parámetros de preentrenamiento:
+- `--mask_ratio`: Proporción de audio de entrada a enmascarar (por defecto: 0.75)
+- `--target_length`: Longitud fija de segmentos de audio (por defecto: 1024)
+- `--world_size`: Número de GPUs para entrenamiento distribuido
+- `--learning_rate`: Tasa de aprendizaje inicial
+- `--num_updates`: Número total de actualizaciones de entrenamiento
+
+### Ajuste Fino
+
+Después del preentrenamiento, el modelo puede ser ajustado en datos etiquetados:
+
+```bash
+./scripts/finetune.sh \
+  --model_path ./checkpoints/pretrain/checkpoint_best.pt \
+  --save_dir ./checkpoints/finetune \
+  --data_dir ./data/labeled/audio \
+  --labels ./data/labeled/labels.csv \
+  --cuda 0 \
+  --batch_size 96 \
+  --num_classes 527 \
+  --target_length 1024 \
+  --mixup 0.8 \
+  --mask_ratio 0.2 \
+  --prediction_mode CLS_TOKEN
+```
+
+Principales parámetros de ajuste fino:
+- `--mixup`: Intensidad de la augmentación mixup (por defecto: 0.8)
+- `--mask_ratio`: Proporción de audio de entrada a enmascarar (por defecto: 0.2)
+- `--num_classes`: Número de clases de clasificación
+- `--prediction_mode`: Cómo generar predicciones (CLS_TOKEN, MEAN_POOLING, o LIN_SOFTMAX)
+
+El modelo soporta tres modos de predicción:
+- `CLS_TOKEN`: Usar la incrustación del token [CLS] (por defecto)
+- `MEAN_POOLING`: Promediar todas las incrustaciones de tokens
+- `LIN_SOFTMAX`: Usar softmax lineal sobre todos los tokens
+
+Características avanzadas durante el ajuste fino:
+- SpecAugment: Augmentación de enmascaramiento de frecuencia y tiempo
+- Mixup: Augmentación de mezcla de audio
+- Decaimiento de la tasa de aprendizaje por capa
+- Suavizado de etiquetas
 
 ## Cita
 
@@ -138,14 +200,12 @@ Si utilizas este código en tu investigación, por favor cita:
   year={2022}
 }
 ```
-```
 @article{chen2024eat,
   title={EAT: Self-Supervised Pre-Training with Efficient Audio Transformer},
   author={Chen, Wenxi and Liang, Yuzhe and Ma, Ziyang and Zheng, Zhisheng and Chen, Xie},
   journal={arXiv preprint arXiv:2401.03497},
   year={2024}
 }
-```
 ```bibtex
 @misc{bioacoustics,
   author = {Marian Basti},
