@@ -37,6 +37,7 @@ class TrainingMonitor:
             "UserWarning:",
             "torch.distributed"
         ]
+        self.terminated = False
         
     def is_error(self, line: str) -> bool:
         """Check if log line indicates an error"""
@@ -69,6 +70,7 @@ class TrainingMonitor:
     def start_training(self, cmd, total_epochs):
         """Start training process with both stdout and stderr pipes"""
         self.total_epochs = total_epochs
+        self.terminated = False
         self.process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -80,9 +82,19 @@ class TrainingMonitor:
         
     def stop_training(self):
         """Stop training process gracefully"""
-        if self.process:
-            os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-            self.process = None
+        if self.process and not self.terminated:
+            try:
+                # Check if process is still running
+                if self.process.poll() is None:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+                    # Give process time to terminate
+                    self.process.wait(timeout=5)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                # Process already terminated or timeout occurred
+                pass
+            finally:
+                self.terminated = True
+                self.process = None
             
     def update_metrics(self, log_line: str):
         """Update metrics from log line"""
@@ -206,7 +218,7 @@ def main():
         encoder_embed_dim = st.number_input("Encoder Embedding Dimension", min_value=64, value=768)
         
     # Add stop button if training is in progress
-    if st.session_state.monitor.process:
+    if st.session_state.monitor.process and not st.session_state.monitor.terminated:
         if st.button("Stop Training"):
             st.session_state.monitor.stop_training()
             st.error("Training stopped by user")
@@ -243,15 +255,15 @@ def main():
                     f"--supervised_weight={supervised_weight}"
                 ])
             if positive_dir:
-                cmd.append(f"--positive_dir={positive_dir}")
+                cmd.append(f("--positive_dir={positive_dir}"))
             if negative_dir:
-                cmd.append(f"--negative_dir={negative_dir}")
+                cmd.append(f("--negative_dir={negative_dir}"))
                 
             # Pre-training specific
             if training_mode == "Pre-training":
                 cmd.extend([
-                    f"--mask_ratio={mask_ratio}",
-                    f"--target_length={target_length}"
+                    f("--mask_ratio={mask_ratio}"),
+                    f("--target_length={target_length}")
                 ])
             
             # Create persistent UI containers with better layout
