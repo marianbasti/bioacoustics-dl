@@ -236,7 +236,8 @@ def main():
     
     # Generate command button in first column
     if col_buttons[0].button("Generate Training Command"):
-        cmd = ["accelerate", "launch", "train.py"]
+        config_path = save_config(config)
+        cmd = ["accelerate", "launch", "--config_file", config_path, "train.py"]
         
         # Basic parameters
         cmd.extend([
