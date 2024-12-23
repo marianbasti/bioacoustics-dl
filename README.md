@@ -1,6 +1,6 @@
 # Deep Learning para Bioacústica
 
-Este proyecto implementa un sistema de aprendizaje profundo para el análisis de datos bioacústicos utilizando el modelo BEATs (Bioacoustic Event Analysis and Training system).
+Este proyecto implementa un sistema de aprendizaje profundo para el análisis de datos bioacústicos utilizando el modelo BEATs (Bioacoustic Event Analysis and Training system) y EAT (Efficient Audio Transformer).
 
 ## Características
 
@@ -19,9 +19,38 @@ cd bioacoustics
 pip install -r requirements.txt
 ```
 
-## Uso
+## Estructura de Datos
 
-### Entrenamiento
+El proyecto espera la siguiente estructura de directorios:
+
+```
+data/
+├── unlabeled/           # Datos no etiquetados para entrenamiento auto-supervisado
+│   ├── *.wav           # Archivos de audio en cualquier formato soportado
+│   └── ...
+├── labeled/            # Datos etiquetados (opcional)
+│   ├── audio/         # Archivos de audio etiquetados
+│   │   ├── *.wav
+│   │   └── ...
+│   └── labels.csv     # Archivo CSV con etiquetas
+├── positive/          # Ejemplos positivos para contrastive learning (opcional)
+│   ├── *.wav
+│   └── ...
+└── negative/          # Ejemplos negativos para contrastive learning (opcional)
+    ├── *.wav
+    └── ...
+```
+
+### Formato del archivo labels.csv
+
+```csv
+filename,labels
+audio1.wav,"label1,label2"
+audio2.wav,"label2,label3"
+```
+
+## Uso
+## Entrenamiento del Modelo EAT
 
 El entrenamiento puede realizarse en modo auto-supervisado o supervisado:
 
@@ -54,36 +83,6 @@ streamlit run beats/interactive_vis.py -- \
     --data_dir /ruta/a/audios \
     --checkpoint_path /ruta/a/checkpoint.pt \
     --max_samples 1000
-```
-
-## Estructura de Datos
-
-El proyecto espera la siguiente estructura de directorios:
-
-```
-data/
-├── unlabeled/           # Datos no etiquetados para entrenamiento auto-supervisado
-│   ├── *.wav           # Archivos de audio en cualquier formato soportado
-│   └── ...
-├── labeled/            # Datos etiquetados (opcional)
-│   ├── audio/         # Archivos de audio etiquetados
-│   │   ├── *.wav
-│   │   └── ...
-│   └── labels.csv     # Archivo CSV con etiquetas
-├── positive/          # Ejemplos positivos para contrastive learning (opcional)
-│   ├── *.wav
-│   └── ...
-└── negative/          # Ejemplos negativos para contrastive learning (opcional)
-    ├── *.wav
-    └── ...
-```
-
-### Formato del archivo labels.csv
-
-```csv
-filename,labels
-audio1.wav,"label1,label2"
-audio2.wav,"label2,label3"
 ```
 
 ## Configuración
@@ -152,7 +151,7 @@ Principales parámetros de preentrenamiento:
 - `--learning_rate`: Tasa de aprendizaje inicial
 - `--num_updates`: Número total de actualizaciones de entrenamiento
 
-### Ajuste Fino
+### Finetuning
 
 Después del preentrenamiento, el modelo puede ser ajustado en datos etiquetados:
 
