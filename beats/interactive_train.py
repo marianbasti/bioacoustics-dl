@@ -58,22 +58,24 @@ class TrainingMonitor:
     def stream_output(self, process):
         """Stream process output to queue"""
         try:
-            for line in iter(process.stdout.readline, ''):
+            for line in iter(process.stdout.readline, b''):
                 if self.should_stop:
                     break
+                line = line.decode('utf-8', errors='replace').rstrip()
                 self.parse_training_line(line)
-                self.output_queue.put(('stdout', line))
-                self.debug_info.append(f"STDOUT: {line.strip()}")
+                self.output_queue.put(('stdout', line + '\n'))
+                self.debug_info.append(f"STDOUT: {line}")
             process.stdout.close()
         except Exception as e:
             self.debug_info.append(f"Error in stdout stream: {str(e)}")
             
         try:
-            for line in iter(process.stderr.readline, ''):
+            for line in iter(process.stderr.readline, b''):
                 if self.should_stop:
                     break
-                self.output_queue.put(('stderr', line))
-                self.debug_info.append(f"STDERR: {line.strip()}")
+                line = line.decode('utf-8', errors='replace').rstrip()
+                self.output_queue.put(('stderr', line + '\n'))
+                self.debug_info.append(f"STDERR: {line}")
             process.stderr.close()
         except Exception as e:
             self.debug_info.append(f"Error in stderr stream: {str(e)}")
@@ -88,7 +90,8 @@ class TrainingMonitor:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                universal_newlines=True,
+                bufsize=1,  # Line buffering
+                text=False,  # Get bytes instead of text
                 preexec_fn=os.setsid,
                 cwd=os.path.dirname(os.path.abspath(__file__))  # Set working directory to script location
             )
@@ -102,12 +105,48 @@ class TrainingMonitor:
             raise
 
     def stop_training(self):
-        """Gracefully stop training process"""
-        if self.process:
-            self.should_stop = True
-            os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-            self.process.wait()
+        """Gracefully stop training process and clean up resources"""
+        try:
+            if self.process:
+                self.should_stop = True
+                self.debug_info.append("Stopping training process...")
+                
+                # Try graceful termination first
+                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+                
+                # Give it some time to terminate gracefully
+                for _ in range(5):
+                    if self.process.poll() is not None:
+                        break
+                    time.sleep(1)
+                    
+                # Force kill if still running
+                if self.process.poll() is None:
+                    self.debug_info.append("Process didn't terminate gracefully, forcing...")
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                
+                # Clean up
+                self.process.stdout.close()
+                self.process.stderr.close()
+                self.process.wait()
+                self.process = None
+                
+                # Clear queues
+                while not self.output_queue.empty():
+                    try:
+                        self.output_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                        
+                self.debug_info.append("Training process stopped and cleaned up")
+        except Exception as e:
+            self.debug_info.append(f"Error during cleanup: {str(e)}")
+        finally:
             self.process = None
+            self.should_stop = False
+            self.current_epoch = 0
+            self.current_batch = 0
+            self.current_loss = 0.0
 
 def configure_accelerate(num_gpus, output_dir):
     """Configure accelerate using subprocess to simulate user input"""
@@ -158,12 +197,13 @@ def render_training_interface():
     }
 
 def main():
-    # Initialize training monitor in session state if not exists
+    # Initialize training monitor and button state in session state if not exists
     if 'monitor' not in st.session_state:
         st.session_state.monitor = TrainingMonitor()
         st.session_state.cmd = None
         st.session_state.config_saved = False
-    
+        st.session_state.training_active = False  # Add training state tracking
+
     st.title("BEATs Training Interface")
     
     with st.sidebar:
@@ -301,15 +341,25 @@ def main():
         st.success(f"Configuration saved to: {config_path}")
         st.session_state.project_dir = os.path.dirname(os.path.abspath(__file__))
     
-    if st.session_state.monitor.process and st.session_state.monitor.process.poll() is None:
-        # Show stop button if training is running
-        if col_buttons[1].button("Stop Training"):
-            st.session_state.monitor.stop_training()
-            st.warning("Training stopped by user")
-    else:
-        # Show start button if training is not running
-        start_disabled = not st.session_state.config_saved
-        if col_buttons[1].button("Start Training", disabled=start_disabled):
+    # Combined Start/Stop button with dynamic label
+    button_label = "Stop Training" if st.session_state.training_active else "Start Training"
+    if col_buttons[1].button(button_label, disabled=not st.session_state.config_saved and not st.session_state.training_active):
+        if st.session_state.training_active:
+            try:
+                st.session_state.monitor.stop_training()
+                st.session_state.training_active = False
+                # Clear interface elements
+                if 'ui' in locals():
+                    ui['training_log'].empty()
+                    ui['warning_log'].empty()
+                    ui['error_log'].empty()
+                st.warning("Training stopped by user")
+            except Exception as e:
+                st.error(f"Error stopping training: {str(e)}")
+                if st.session_state.monitor.debug_info:
+                    st.code('\n'.join(st.session_state.monitor.debug_info[-100:]))
+        else:
+            # Start training
             if st.session_state.cmd:
                 try:
                     with st.spinner("Configuring Accelerate..."):
@@ -322,10 +372,11 @@ def main():
                     # Add debug output section
                     debug_output = st.empty()
                     
-                    # Start training
+                    # Start training and update state
                     st.session_state.monitor.start_training(st.session_state.cmd)
                     st.session_state.monitor.total_epochs = epochs
-                    
+                    st.session_state.training_active = True
+
                     # Initialize log buffers
                     training_buffer = []
                     warning_buffer = []
@@ -360,12 +411,16 @@ def main():
                                     if len(training_buffer) > 100:
                                         training_buffer.pop(0)
                                     ui['training_log'].code('\n'.join(training_buffer))
+                                    ui['training_log'].empty()  # Force refresh
+                                    ui['training_log'].code('\n'.join(training_buffer))
                                 else:  # stderr
                                     if 'warning' in line.lower():
                                         warning_buffer.append(line)
+                                        ui['warning_log'].empty()  # Force refresh
                                         ui['warning_log'].code('\n'.join(warning_buffer))
                                     else:
                                         error_buffer.append(line)
+                                        ui['error_log'].empty()  # Force refresh
                                         ui['error_log'].code('\n'.join(error_buffer))
                                 
                             except queue.Empty:
