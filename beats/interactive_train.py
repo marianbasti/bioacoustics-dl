@@ -109,7 +109,7 @@ class TrainingMonitor:
             self.process.wait()
             self.process = None
 
-def configure_accelerate(num_gpus):
+def configure_accelerate(num_gpus, output_dir):
     """Configure accelerate using subprocess to simulate user input"""
     config = {
         "compute_environment": "LOCAL_MACHINE",
@@ -123,8 +123,8 @@ def configure_accelerate(num_gpus):
         "machine_rank": 0
     }
     
-    # Save temporary accelerate config
-    config_path = os.path.expanduser("~/.cache/huggingface/accelerate/default_config.yaml")
+    # Save accelerate config to the output directory
+    config_path = os.path.expanduser(f"{output_dir}/accelerate_config.yaml")
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     
     with open(config_path, "w") as f:
@@ -313,7 +313,7 @@ def main():
             if st.session_state.cmd:
                 try:
                     with st.spinner("Configuring Accelerate..."):
-                        config_path = configure_accelerate(num_gpus)
+                        config_path = configure_accelerate(num_gpus, output_dir)
                         st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
                     
                     # Setup training interface
