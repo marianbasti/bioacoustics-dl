@@ -5,156 +5,11 @@ import torch
 from pathlib import Path
 import yaml
 import tempfile
-import re
 import time
-import signal
-from dataclasses import dataclass
-from typing import Optional, Dict
-import psutil  # Add this import
-import atexit
-
-@dataclass
-class TrainingMetrics:
-    epoch: int = 0
-    batch: int = 0
-    loss: float = 0.0
-    epoch_loss: float = 0.0
-    progress: float = 0.0
-    
-class TrainingMonitor:
-    def __init__(self):
-        self.process: Optional[subprocess.Popen] = None
-        self.metrics = TrainingMetrics()
-        self.total_epochs = 0
-        self.total_batches = 0
-        self.error_patterns = [
-            "Error:",
-            "Exception:",
-            "Traceback",
-            "RuntimeError:",
-            "CUDA out of memory"
-        ]
-        self.warning_patterns = [
-            "Warning:",
-            "UserWarning:",
-            "torch.distributed"
-        ]
-        self._cleanup_handler_registered = False
-        
-    def _find_process_children(self):
-        """Find all child processes of the training process"""
-        if not self.process:
-            return []
-        try:
-            parent = psutil.Process(self.process.pid)
-            children = parent.children(recursive=True)
-            return [parent] + children
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return []
-        
-    def is_error(self, line: str) -> bool:
-        """Check if log line indicates an error"""
-        return any(pattern in line for pattern in self.error_patterns)
-        
-    def is_warning(self, line: str) -> bool:
-        """Check if log line is just a warning"""
-        return any(pattern in line for pattern in self.warning_patterns)
-        
-    def parse_log_line(self, line: str) -> Dict:
-        """Parse metrics from log line"""
-        metrics = {}
-        # Match epoch info
-        epoch_match = re.search(r"Epoch (\d+)", line)
-        if epoch_match:
-            metrics['epoch'] = int(epoch_match.group(1))
-            
-        # Match batch info
-        batch_match = re.search(r"Batch (\d+)", line)
-        if batch_match:
-            metrics['batch'] = int(batch_match.group(1))
-            
-        # Match loss value
-        loss_match = re.search(r"Loss: (\d+\.\d+)", line)
-        if loss_match:
-            metrics['loss'] = float(loss_match.group(1))
-            
-        return metrics
-    
-    def start_training(self, cmd, total_epochs):
-        """Start training process with both stdout and stderr pipes"""
-        self.total_epochs = total_epochs
-        
-        # Register cleanup handler only once
-        if not self._cleanup_handler_registered:
-            atexit.register(self.stop_training)
-            self._cleanup_handler_registered = True
-            
-        try:
-            # Create process without preexec_fn and start_new_session
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                bufsize=1,  # Line buffered
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-            )
-        except Exception as e:
-            st.error(f"Failed to start training process: {str(e)}")
-            self.process = None
-            raise
-    
-    def stop_training(self):
-        """Stop training process and all its children gracefully"""
-        if self.process:
-            try:
-                # Try to stop all child processes
-                processes = self._find_process_children()
-                
-                # Send termination signal appropriate for the platform
-                if os.name == 'nt':
-                    self.process.send_signal(signal.CTRL_BREAK_EVENT)
-                else:
-                    self.process.terminate()
-                
-                # Wait briefly for graceful shutdown
-                try:
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
-                
-            except Exception as e:
-                st.warning(f"Error during process cleanup: {str(e)}")
-            finally:
-                # Force kill any remaining processes
-                if self.process.poll() is None:
-                    try:
-                        self.process.kill()
-                    except:
-                        pass
-                
-                for proc in self._find_process_children():
-                    try:
-                        proc.kill()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                
-                self.process = None
-                
-    def update_metrics(self, log_line: str):
-        """Update metrics from log line"""
-        parsed = self.parse_log_line(log_line)
-        if parsed:
-            if 'epoch' in parsed:
-                self.metrics.epoch = parsed['epoch']
-            if 'batch' in parsed:
-                self.metrics.batch = parsed['batch']
-            if 'loss' in parsed:
-                self.metrics.loss = parsed['loss']
-                
-            # Calculate progress
-            self.metrics.progress = (self.metrics.epoch + 
-                                   (self.metrics.batch / self.total_batches if self.total_batches else 0)) / self.total_epochs
+from threading import Thread
+from queue import Queue, Empty
+import re
+import logging
 
 def get_available_gpus():
     if torch.cuda.is_available():
@@ -189,12 +44,150 @@ def configure_accelerate(num_gpus):
     
     return config_path
 
+def enqueue_output(out, queue):
+    """Add output lines to queue for non-blocking reads"""
+    for line in iter(out.readline, b''):
+        queue.put(line)
+    out.close()
+
+class TrainingMonitor:
+    def __init__(self):
+        self.log_pattern = re.compile(r'Epoch (\d+).*Loss: (\d+\.\d+)')
+        self.warning_pattern = re.compile(r'warn(?:ing)?', re.IGNORECASE)
+        self.error_pattern = re.compile(r'error|exception|traceback', re.IGNORECASE)
+        
+    def parse_line(self, line):
+        """Parse a log line and classify it"""
+        if self.error_pattern.search(line):
+            return "error", line
+        if self.warning_pattern.search(line):
+            return "warning", line
+            
+        # Try to extract training metrics
+        match = self.log_pattern.search(line)
+        if match:
+            epoch, loss = match.groups()
+            return "metric", {
+                "epoch": int(epoch),
+                "loss": float(loss)
+            }
+        
+        return "info", line
+
+def launch_training(cmd, num_gpus):
+    """Launch and monitor training process with rich feedback"""
+    
+    # Setup progress tracking
+    progress_bar = st.progress(0)
+    status = st.empty()
+    metrics = st.empty()
+    log_container = st.container()
+    
+    # Create columns for different log types
+    col1, col2 = st.columns(2)
+    with col1:
+        warning_expander = st.expander("Warnings", expanded=False)
+        warnings = []
+    with col2:
+        error_expander = st.expander("Errors", expanded=False)
+        errors = []
+    
+    # Initialize monitoring
+    monitor = TrainingMonitor()
+    
+    try:
+        # Start training process
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            bufsize=1
+        )
+        
+        # Setup non-blocking reads
+        q_out = Queue()
+        q_err = Queue()
+        t_out = Thread(target=enqueue_output, args=(process.stdout, q_out))
+        t_err = Thread(target=enqueue_output, args=(process.stderr, q_err))
+        t_out.daemon = True
+        t_err.daemon = True
+        t_out.start()
+        t_err.start()
+        
+        # Monitoring state
+        current_metrics = {"epoch": 0, "loss": 0.0}
+        start_time = time.time()
+        
+        # Monitor process
+        while True:
+            # Check if process is still running
+            if process.poll() is not None:
+                break
+                
+            # Handle stdout
+            try:
+                line = q_out.get_nowait().strip()
+            except Empty:
+                line = None
+                
+            if line:
+                msg_type, content = monitor.parse_line(line)
+                
+                if msg_type == "metric":
+                    current_metrics.update(content)
+                    metrics.metric("Epoch", current_metrics["epoch"])
+                    metrics.metric("Loss", current_metrics["loss"])
+                    # Update progress assuming we know total epochs from cmd
+                    total_epochs = int([arg.split('=')[1] for arg in cmd if '--epochs=' in arg][0])
+                    progress = (current_metrics["epoch"] + 1) / total_epochs
+                    progress_bar.progress(progress)
+                    
+                elif msg_type == "warning":
+                    warnings.append(content)
+                    with warning_expander:
+                        st.write("\n".join(warnings))
+                        
+                elif msg_type == "error":
+                    errors.append(content)
+                    with error_expander:
+                        st.write("\n".join(errors))
+                        
+                else:  # info
+                    with log_container:
+                        st.text(content)
+            
+            # Handle stderr
+            try:
+                err_line = q_err.get_nowait().strip()
+                if err_line:
+                    errors.append(err_line)
+                    with error_expander:
+                        st.write("\n".join(errors))
+            except Empty:
+                pass
+            
+            # Update status
+            elapsed = time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))
+            status.text(f"Training for {elapsed} | Epoch {current_metrics['epoch']} | Loss: {current_metrics['loss']:.4f}")
+            
+            # Prevent CPU hogging
+            time.sleep(0.1)
+        
+        # Process finished
+        rc = process.poll()
+        if rc == 0:
+            st.success("Training completed successfully!")
+        else:
+            st.error(f"Training failed with exit code {rc}")
+            
+    except Exception as e:
+        st.error(f"Error monitoring training: {str(e)}")
+        if process:
+            process.kill()
+
 def main():
     st.title("BEATs Training Interface")
-    
-    # Initialize session state for training monitor
-    if 'monitor' not in st.session_state:
-        st.session_state.monitor = TrainingMonitor()
     
     with st.sidebar:
         st.header("Training Mode")
@@ -262,148 +255,84 @@ def main():
         encoder_layers = st.number_input("Encoder Layers", min_value=1, value=12)
         encoder_embed_dim = st.number_input("Encoder Embedding Dimension", min_value=64, value=768)
         
-    # Add stop button if training is in progress
-    if st.session_state.monitor.process:
-        if st.button("Stop Training", key="stop_button"):
-            with st.spinner("Stopping training..."):
-                st.session_state.monitor.stop_training()
-                st.error("Training stopped by user")
-                time.sleep(1)  # Brief pause to ensure cleanup
-                st.rerun()
-    
     # Generate command button
-    if st.button("Start Training"):
-        try:
-            with st.spinner("Configuring Accelerate..."):
-                config_path = configure_accelerate(num_gpus)
-                st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
-            
-            # Create command
-            cmd = ["accelerate", "launch", "beats/train.py"]
+    if st.button("Generate Training Command"):
+        cmd = ["accelerate", "launch", "train.py"]
+        
+        # Basic parameters
+        cmd.extend([
+            f"--data_dir={data_dir}",
+            f"--output_dir={output_dir}",
+            f"--batch_size={batch_size}",
+            f"--epochs={epochs}",
+            f"--lr={learning_rate}",
+            f"--segment_duration={segment_duration}",
+            f"--checkpoint_freq={checkpoint_freq}",
+            f"--gradient_accumulation_steps={grad_accum_steps}",
+            f"--encoder_layers={encoder_layers}",
+            f"--encoder_embed_dim={encoder_embed_dim}"
+        ])
+        
+        # Optional paths
+        if model_path:
+            cmd.append(f"--model_path={model_path}")
+        if training_mode == "Supervised":
             cmd.extend([
-                f"--data_dir={data_dir}",
-                f"--output_dir={output_dir}",
-                f"--batch_size={batch_size}",
-                f"--epochs={epochs}",
-                f"--lr={learning_rate}",
-                f"--segment_duration={segment_duration}",
-                f"--checkpoint_freq={checkpoint_freq}",
-                f"--gradient_accumulation_steps={grad_accum_steps}",
-                f"--encoder_layers={encoder_layers}",
-                f"--encoder_embed_dim={encoder_embed_dim}"
+                f"--labeled_dir={labeled_dir}",
+                f"--supervised_weight={supervised_weight}"
             ])
+        if positive_dir:
+            cmd.append(f"--positive_dir={positive_dir}")
+        if negative_dir:
+            cmd.append(f"--negative_dir={negative_dir}")
             
-            # Optional paths
-            if model_path:
-                cmd.append(f"--model_path={model_path}")
-            if training_mode == "Supervised":
-                cmd.extend([
-                    f"--labeled_dir={labeled_dir}",
-                    f"--supervised_weight={supervised_weight}"
-                ])
-            if positive_dir:
-                cmd.append(f"--positive_dir={positive_dir}")
-            if negative_dir:
-                cmd.append(f"--negative_dir={negative_dir}")
+        # Pre-training specific
+        if training_mode == "Pre-training":
+            cmd.extend([
+                f"--mask_ratio={mask_ratio}",
+                f"--target_length={target_length}"
+            ])
+        
+        # Display command
+        st.code(" ".join(cmd))
+        
+        # Save configuration
+        config = {
+            "training_mode": training_mode,
+            "data_config": {
+                "data_dir": data_dir,
+                "output_dir": output_dir,
+                "model_path": model_path,
+            },
+            "training_params": {
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "learning_rate": learning_rate,
+                "segment_duration": segment_duration,
+                "checkpoint_freq": checkpoint_freq,
+                "gradient_accumulation_steps": grad_accum_steps,
+            },
+            "model_architecture": {
+                "encoder_layers": encoder_layers,
+                "encoder_embed_dim": encoder_embed_dim,
+            }
+        }
+        
+        config_path = save_config(config)
+        st.success(f"Configuration saved to: {config_path}")
+        
+        # Execute button
+        if st.button("Start Training"):
+            try:
+                with st.spinner("Configuring Accelerate..."):
+                    config_path = configure_accelerate(num_gpus)
+                    st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
                 
-            # Pre-training specific
-            if training_mode == "Pre-training":
-                cmd.extend([
-                    f"--mask_ratio={mask_ratio}",
-                    f"--target_length={target_length}"
-                ])
-            
-            # Create persistent UI containers with better layout
-            status_container = st.empty()
-            col1, col2 = st.columns([2, 1])  # 2:1 ratio for logs and metrics
-            
-            with col1:
-                st.markdown("### Training Logs")
-                # Create a large scrollable text area for logs
-                log_area = st.empty()
-                all_logs = []
-            
-            with col2:
-                st.markdown("### Metrics")
-                metric_containers = st.columns(3)
-                with metric_containers[0]:
-                    epoch_metric = st.empty()
-                with metric_containers[1]:
-                    batch_metric = st.empty()
-                with metric_containers[2]:
-                    loss_metric = st.empty()
-                progress_bar = st.progress(0)
-                metrics_display = st.empty()
-            
-            status_container.info("Starting training...")
-            
-            # Start training
-            st.session_state.monitor.start_training(cmd, epochs)
-            
-            has_error = False
-            
-            # Monitor training progress
-            while st.session_state.monitor.process:
-                outputs = []
+                st.info("Starting training...")
+                launch_training(cmd, num_gpus)
                 
-                # Read from stdout and stderr (non-blocking)
-                for pipe in [st.session_state.monitor.process.stdout, 
-                           st.session_state.monitor.process.stderr]:
-                    while True:
-                        line = pipe.readline()
-                        if not line:
-                            break
-                        outputs.append(line)
-                
-                # Check if process has finished
-                if not outputs and st.session_state.monitor.process.poll() is not None:
-                    break
-                
-                # Process outputs
-                for line in outputs:
-                    # Add to log history
-                    all_logs.append(line.strip())
-                    # Keep only last 1000 lines to prevent memory issues
-                    if len(all_logs) > 1000:
-                        all_logs.pop(0)
-                    
-                    # Update scrollable log display
-                    log_area.code('\n'.join(all_logs))
-                    
-                    if st.session_state.monitor.is_error(line):
-                        has_error = True
-                        status_container.error(line.strip())
-                    else:
-                        # Update metrics if line contains them
-                        st.session_state.monitor.update_metrics(line)
-                        metrics = st.session_state.monitor.metrics
-                        
-                        # Update metrics display
-                        status_container.info(f"Training in progress... Epoch {metrics.epoch + 1}/{epochs}")
-                        epoch_metric.metric("Epoch", f"{metrics.epoch + 1}/{epochs}")
-                        batch_metric.metric("Batch", metrics.batch)
-                        loss_metric.metric("Loss", f"{metrics.loss:.4f}")
-                        progress_bar.progress(metrics.progress)
-                        metrics_display.json(st.session_state.monitor.metrics.__dict__)
-                
-                time.sleep(0.1)
-            
-            # Check final status
-            rc = st.session_state.monitor.process.poll()
-            if rc == 0 and not has_error:
-                status_container.success("Training completed successfully!")
-            else:
-                status_container.error("Training failed. Check logs for details.")
-            
-            # Save logs to file
-            log_path = Path(output_dir) / "training_logs.txt"
-            with open(log_path, "w") as f:
-                f.write('\n'.join(all_logs))
-            st.info(f"Full logs saved to: {log_path}")
-            
-        except Exception as e:
-            st.error(f"Error during training: {str(e)}")
-            st.session_state.monitor.stop_training()
+            except Exception as e:
+                st.error(f"Failed to start training: {str(e)}")
 
 if __name__ == "__main__":
     main()
