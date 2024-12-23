@@ -254,73 +254,78 @@ def main():
                     f"--target_length={target_length}"
                 ])
             
-            # Create persistent UI containers
+            # Create persistent UI containers with better layout
             status_container = st.empty()
-            metric_containers = st.columns(3)
-            progress_container = st.empty()
-            metrics_container = st.empty()
-            log_container = st.empty()
-            warning_container = st.empty()
+            col1, col2 = st.columns([2, 1])  # 2:1 ratio for logs and metrics
             
-            # Initialize metric displays
-            with metric_containers[0]:
-                epoch_metric = st.empty()
-            with metric_containers[1]:
-                batch_metric = st.empty()
-            with metric_containers[2]:
-                loss_metric = st.empty()
+            with col1:
+                st.markdown("### Training Logs")
+                # Create a large scrollable text area for logs
+                log_area = st.empty()
+                all_logs = []
+            
+            with col2:
+                st.markdown("### Metrics")
+                metric_containers = st.columns(3)
+                with metric_containers[0]:
+                    epoch_metric = st.empty()
+                with metric_containers[1]:
+                    batch_metric = st.empty()
+                with metric_containers[2]:
+                    loss_metric = st.empty()
+                progress_bar = st.progress(0)
+                metrics_display = st.empty()
             
             status_container.info("Starting training...")
             
             # Start training
             st.session_state.monitor.start_training(cmd, epochs)
             
-            # Collect warnings separately
-            warnings = []
             has_error = False
             
             # Monitor training progress
             while st.session_state.monitor.process:
-                # Check both stdout and stderr
                 outputs = []
                 
-                # Read from stdout (non-blocking)
-                output = st.session_state.monitor.process.stdout.readline()
-                if output:
-                    outputs.append(output)
-                
-                # Read from stderr (non-blocking)
-                error = st.session_state.monitor.process.stderr.readline()
-                if error:
-                    outputs.append(error)
+                # Read from stdout and stderr (non-blocking)
+                for pipe in [st.session_state.monitor.process.stdout, 
+                           st.session_state.monitor.process.stderr]:
+                    while True:
+                        line = pipe.readline()
+                        if not line:
+                            break
+                        outputs.append(line)
                 
                 # Check if process has finished
-                if (not output and not error and 
-                    st.session_state.monitor.process.poll() is not None):
+                if not outputs and st.session_state.monitor.process.poll() is not None:
                     break
                 
                 # Process outputs
                 for line in outputs:
-                    if st.session_state.monitor.is_warning(line):
-                        warnings.append(line.strip())
-                        warning_container.text("Latest warning: " + line.strip())
-                    elif st.session_state.monitor.is_error(line):
+                    # Add to log history
+                    all_logs.append(line.strip())
+                    # Keep only last 1000 lines to prevent memory issues
+                    if len(all_logs) > 1000:
+                        all_logs.pop(0)
+                    
+                    # Update scrollable log display
+                    log_area.code('\n'.join(all_logs))
+                    
+                    if st.session_state.monitor.is_error(line):
                         has_error = True
                         status_container.error(line.strip())
                     else:
-                        # Update metrics and display
+                        # Update metrics if line contains them
                         st.session_state.monitor.update_metrics(line)
                         metrics = st.session_state.monitor.metrics
                         
-                        # Update UI with persistent containers
+                        # Update metrics display
                         status_container.info(f"Training in progress... Epoch {metrics.epoch + 1}/{epochs}")
                         epoch_metric.metric("Epoch", f"{metrics.epoch + 1}/{epochs}")
                         batch_metric.metric("Batch", metrics.batch)
                         loss_metric.metric("Loss", f"{metrics.loss:.4f}")
-                        
-                        progress_container.progress(metrics.progress)
-                        metrics_container.json(st.session_state.monitor.metrics.__dict__)
-                        log_container.text(line.strip())
+                        progress_bar.progress(metrics.progress)
+                        metrics_display.json(st.session_state.monitor.metrics.__dict__)
                 
                 time.sleep(0.1)
             
@@ -330,10 +335,12 @@ def main():
                 status_container.success("Training completed successfully!")
             else:
                 status_container.error("Training failed. Check logs for details.")
-                if warnings:
-                    with st.expander("Show warnings"):
-                        for w in warnings:
-                            st.warning(w)
+            
+            # Save logs to file
+            log_path = Path(output_dir) / "training_logs.txt"
+            with open(log_path, "w") as f:
+                f.write('\n'.join(all_logs))
+            st.info(f"Full logs saved to: {log_path}")
             
         except Exception as e:
             st.error(f"Error during training: {str(e)}")
