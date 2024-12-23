@@ -179,7 +179,7 @@ def main():
             num_gpus = st.slider("Number of GPUs", 
                                 min_value=1, 
                                 max_value=len(available_gpus),
-                                value=1)
+                                value=len(available_gpus))
             st.info(f"Will configure distributed training for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
         else:
             st.warning("No GPUs detected")
@@ -190,7 +190,7 @@ def main():
     col1, col2 = st.columns(2)
     
     with col1:
-        data_dir = st.text_input("Data Directory", "data/unlabeled")
+        data_dir = st.text_input("Data Directory", "")
         
         if training_mode == "Supervised":
             labeled_dir = st.text_input("Labeled Data Directory", "data/labeled")
@@ -201,7 +201,7 @@ def main():
             negative_dir = st.text_input("Negative Examples Directory (optional)", "")
     
     with col2:
-        output_dir = st.text_input("Output Directory", "runs/beats_training")
+        output_dir = st.text_input("Output Directory", "")
         model_path = st.text_input("Pre-trained Model Path (optional)", "")
         
     st.header("Training Parameters")
@@ -209,7 +209,7 @@ def main():
     
     with col3:
         epochs = st.number_input("Number of Epochs", min_value=1, value=10)
-        batch_size = st.number_input("Batch Size", min_value=1, value=32)
+        batch_size = st.number_input("Batch Size", min_value=1, value=2)
         learning_rate = st.number_input("Learning Rate", value=1e-5, format="%.1e")
         
     with col4:
@@ -372,7 +372,7 @@ def main():
                                 # Check timeout only if training hasn't started
                                 if not training_started:
                                     timeout_counter += 1
-                                    if timeout_counter > 50:  # 5 seconds timeout
+                                    if timeout_counter > 5000:  # 500 seconds timeout
                                         st.error("Training process failed to start producing output")
                                         break
                                 time.sleep(0.1)
