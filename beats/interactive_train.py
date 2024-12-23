@@ -5,7 +5,12 @@ import torch
 from pathlib import Path
 import yaml
 import tempfile
+import time
 import re
+from datetime import datetime
+import queue
+import threading
+import signal
 
 def get_available_gpus():
     if torch.cuda.is_available():
@@ -16,6 +21,75 @@ def save_config(config):
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.yaml') as f:
         yaml.dump(config, f)
         return f.name
+
+class TrainingMonitor:
+    def __init__(self):
+        self.process = None
+        self.output_queue = queue.Queue()
+        self.should_stop = False
+        self.current_epoch = 0
+        self.total_epochs = 0
+        self.current_batch = 0
+        self.total_batches = 0
+        self.current_loss = 0.0
+        
+    def parse_training_line(self, line):
+        """Parse training output for progress information"""
+        try:
+            # Parse epoch information
+            epoch_match = re.search(r'Epoch (\d+)', line)
+            if epoch_match:
+                self.current_epoch = int(epoch_match.group(1))
+            
+            # Parse batch information
+            batch_match = re.search(r'Batch (\d+)', line)
+            if batch_match:
+                self.current_batch = int(batch_match.group(1))
+            
+            # Parse loss information
+            loss_match = re.search(r'Loss: (\d+\.\d+)', line)
+            if loss_match:
+                self.current_loss = float(loss_match.group(1))
+                
+        except Exception:
+            pass  # Silently handle parsing errors
+        
+    def stream_output(self, process):
+        """Stream process output to queue"""
+        for line in iter(process.stdout.readline, ''):
+            if self.should_stop:
+                break
+            self.parse_training_line(line)
+            self.output_queue.put(('stdout', line))
+        process.stdout.close()
+        
+        for line in iter(process.stderr.readline, ''):
+            if self.should_stop:
+                break
+            self.output_queue.put(('stderr', line))
+        process.stderr.close()
+
+    def start_training(self, cmd):
+        """Start training process with output monitoring"""
+        self.should_stop = False
+        self.process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            preexec_fn=os.setsid
+        )
+        
+        # Start output streaming threads
+        threading.Thread(target=self.stream_output, args=(self.process,), daemon=True).start()
+        
+    def stop_training(self):
+        """Gracefully stop training process"""
+        if self.process:
+            self.should_stop = True
+            os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+            self.process.wait()
+            self.process = None
 
 def configure_accelerate(num_gpus):
     """Configure accelerate using subprocess to simulate user input"""
@@ -39,6 +113,31 @@ def configure_accelerate(num_gpus):
         yaml.dump(config, f)
     
     return config_path
+
+def render_training_interface():
+    """Render training progress interface"""
+    # Create columns for metrics
+    col1, col2, col3 = st.columns(3)
+    
+    # Progress metrics
+    progress = col1.empty()
+    epoch_status = col2.empty()
+    loss_metric = col3.empty()
+    
+    # Training log sections
+    log_tabs = st.tabs(["Training Log", "Warnings", "Errors"])
+    training_log = log_tabs[0].empty()
+    warning_log = log_tabs[1].empty()
+    error_log = log_tabs[2].empty()
+    
+    return {
+        'progress': progress,
+        'epoch_status': epoch_status,
+        'loss_metric': loss_metric,
+        'training_log': training_log,
+        'warning_log': warning_log,
+        'error_log': error_log
+    }
 
 def main():
     st.title("BEATs Training Interface")
@@ -182,42 +281,65 @@ def main():
                     config_path = configure_accelerate(num_gpus)
                     st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
                 
-                progress_bar = st.progress(0)
-                epoch_re = re.compile(r'Epoch\s+(\d+)\s+completed')
+                # Setup training interface
+                ui = render_training_interface()
                 
-                st.info("Starting training...")
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    universal_newlines=True
-                )
+                # Start training
+                st.session_state.monitor.start_training(cmd)
                 
-                # Create a placeholder for logs
-                log_placeholder = st.empty()
+                # Initialize log buffers
+                training_buffer = []
+                warning_buffer = []
+                error_buffer = []
                 
-                # Stream output
-                while True:
-                    output = process.stdout.readline()
-                    if output == '' and process.poll() is not None:
-                        break
-                    if output:
-                        log_placeholder.text(output.strip())
-                        match = epoch_re.search(output)
-                        if match:
-                            current_epoch = int(match.group(1)) + 1
-                            # If total epochs are known, update progress fraction:
-                            progress_fraction = current_epoch / (epochs if epochs else 1)
-                            progress_bar.progress(min(progress_fraction, 1.0))
+                # Monitor training progress
+                while st.session_state.monitor.process and st.session_state.monitor.process.poll() is None:
+                    try:
+                        # Get output from queue
+                        stream, line = st.session_state.monitor.output_queue.get_nowait()
                         
-                rc = process.poll()
-                if rc == 0:
+                        # Process output
+                        if stream == 'stdout':
+                            training_buffer.append(line)
+                            if len(training_buffer) > 100:  # Keep last 100 lines
+                                training_buffer.pop(0)
+                            ui['training_log'].code('\n'.join(training_buffer))
+                        else:  # stderr
+                            if 'warning' in line.lower():
+                                warning_buffer.append(line)
+                                ui['warning_log'].code('\n'.join(warning_buffer))
+                            else:
+                                error_buffer.append(line)
+                                ui['error_log'].code('\n'.join(error_buffer))
+                        
+                        # Update metrics
+                        ui['progress'].progress(
+                            min(st.session_state.monitor.current_epoch / st.session_state.monitor.total_epochs, 1.0)
+                        )
+                        ui['epoch_status'].metric(
+                            "Current Epoch",
+                            f"{st.session_state.monitor.current_epoch}/{st.session_state.monitor.total_epochs}"
+                        )
+                        ui['loss_metric'].metric("Current Loss", f"{st.session_state.monitor.current_loss:.4f}")
+                        
+                    except queue.Empty:
+                        time.sleep(0.1)
+                        continue
+                    
+                # Check final status
+                if st.session_state.monitor.process.returncode == 0:
                     st.success("Training completed successfully!")
                 else:
-                    st.error("Training failed. Check logs for details.")
+                    st.error("Training failed. Check error log for details.")
                     
             except Exception as e:
                 st.error(f"Error during training: {str(e)}")
+                
+    # Add stop button
+    if st.session_state.monitor.process and st.session_state.monitor.process.poll() is None:
+        if st.button("Stop Training"):
+            st.session_state.monitor.stop_training()
+            st.warning("Training stopped by user")
 
 if __name__ == "__main__":
     main()
