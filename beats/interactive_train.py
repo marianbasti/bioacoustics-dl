@@ -239,15 +239,15 @@ def main():
                 f"--supervised_weight={supervised_weight}"
             ])
         if positive_dir:
-            cmd.append(f("--positive_dir={positive_dir}")
+            cmd.append(f"--positive_dir={positive_dir}")
         if negative_dir:
-            cmd.append(f("--negative_dir={negative_dir}")
+            cmd.append(f"--negative_dir={negative_dir}")
             
         # Pre-training specific
         if training_mode == "Pre-training":
             cmd.extend([
-                f("--mask_ratio={mask_ratio}")
-                f("--target_length={target_length}")
+                f"--mask_ratio={mask_ratio}",
+                f"--target_length={target_length}"
             ])
         
         # Display command
