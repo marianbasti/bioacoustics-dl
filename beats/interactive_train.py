@@ -143,7 +143,9 @@ def main():
     # Initialize training monitor in session state if not exists
     if 'monitor' not in st.session_state:
         st.session_state.monitor = TrainingMonitor()
-        
+        st.session_state.cmd = None
+        st.session_state.config_saved = False
+    
     st.title("BEATs Training Interface")
     
     with st.sidebar:
@@ -212,8 +214,10 @@ def main():
         encoder_layers = st.number_input("Encoder Layers", min_value=1, value=12)
         encoder_embed_dim = st.number_input("Encoder Embedding Dimension", min_value=64, value=768)
         
-    # Generate command button
-    if st.button("Generate Training Command"):
+    col_buttons = st.columns(2)
+    
+    # Generate command button in first column
+    if col_buttons[0].button("Generate Training Command"):
         cmd = ["accelerate", "launch", "train.py"]
         
         # Basic parameters
@@ -250,9 +254,6 @@ def main():
                 f"--target_length={target_length}"
             ])
         
-        # Display command
-        st.code(" ".join(cmd))
-        
         # Save configuration
         config = {
             "training_mode": training_mode,
@@ -276,74 +277,85 @@ def main():
         }
         
         config_path = save_config(config)
+        st.session_state.cmd = cmd
+        st.session_state.config_saved = True
+        st.code(" ".join(cmd))
         st.success(f"Configuration saved to: {config_path}")
-        
-        # Execute button
-        if st.button("Start Training"):
-            try:
-                with st.spinner("Configuring Accelerate..."):
-                    config_path = configure_accelerate(num_gpus)
-                    st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
-                
-                # Setup training interface
-                ui = render_training_interface()
-                
-                # Start training
-                st.session_state.monitor.start_training(cmd)
-                
-                # Initialize log buffers
-                training_buffer = []
-                warning_buffer = []
-                error_buffer = []
-                
-                # Monitor training progress
-                while st.session_state.monitor.process and st.session_state.monitor.process.poll() is None:
-                    try:
-                        # Get output from queue
-                        stream, line = st.session_state.monitor.output_queue.get_nowait()
-                        
-                        # Process output
-                        if stream == 'stdout':
-                            training_buffer.append(line)
-                            if len(training_buffer) > 100:  # Keep last 100 lines
-                                training_buffer.pop(0)
-                            ui['training_log'].code('\n'.join(training_buffer))
-                        else:  # stderr
-                            if 'warning' in line.lower():
-                                warning_buffer.append(line)
-                                ui['warning_log'].code('\n'.join(warning_buffer))
-                            else:
-                                error_buffer.append(line)
-                                ui['error_log'].code('\n'.join(error_buffer))
-                        
-                        # Update metrics
-                        ui['progress'].progress(
-                            min(st.session_state.monitor.current_epoch / st.session_state.monitor.total_epochs, 1.0)
-                        )
-                        ui['epoch_status'].metric(
-                            "Current Epoch",
-                            f"{st.session_state.monitor.current_epoch}/{st.session_state.monitor.total_epochs}"
-                        )
-                        ui['loss_metric'].metric("Current Loss", f"{st.session_state.monitor.current_loss:.4f}")
-                        
-                    except queue.Empty:
-                        time.sleep(0.1)
-                        continue
-                    
-                # Check final status
-                if st.session_state.monitor.process.returncode == 0:
-                    st.success("Training completed successfully!")
-                else:
-                    st.error("Training failed. Check error log for details.")
-                    
-            except Exception as e:
-                st.error(f"Error during training: {str(e)}")
-                
-    # Add stop button
+
+    # Start/Stop training button in second column
     if st.session_state.monitor.process and st.session_state.monitor.process.poll() is None:
-        if st.button("Stop Training"):
+        # Show stop button if training is running
+        if col_buttons[1].button("Stop Training"):
             st.session_state.monitor.stop_training()
             st.warning("Training stopped by user")
+    else:
+        # Show start button if training is not running
+        start_disabled = not st.session_state.config_saved
+        if col_buttons[1].button("Start Training", disabled=start_disabled):
+            if st.session_state.cmd:
+                try:
+                    with st.spinner("Configuring Accelerate..."):
+                        config_path = configure_accelerate(num_gpus)
+                        st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
+                    
+                    # Setup training interface
+                    ui = render_training_interface()
+                    
+                    # Start training
+                    st.session_state.monitor.start_training(st.session_state.cmd)
+                    st.session_state.monitor.total_epochs = epochs  # Set total epochs
+                    
+                    # Initialize log buffers
+                    training_buffer = []
+                    warning_buffer = []
+                    error_buffer = []
+                    
+                    # Monitor training progress
+                    while st.session_state.monitor.process and st.session_state.monitor.process.poll() is None:
+                        try:
+                            stream, line = st.session_state.monitor.output_queue.get_nowait()
+                            
+                            # Process output
+                            if stream == 'stdout':
+                                training_buffer.append(line)
+                                if len(training_buffer) > 100:
+                                    training_buffer.pop(0)
+                                ui['training_log'].code('\n'.join(training_buffer))
+                            else:  # stderr
+                                if 'warning' in line.lower():
+                                    warning_buffer.append(line)
+                                    ui['warning_log'].code('\n'.join(warning_buffer))
+                                else:
+                                    error_buffer.append(line)
+                                    ui['error_log'].code('\n'.join(error_buffer))
+                            
+                            # Update metrics
+                            if st.session_state.monitor.total_epochs > 0:
+                                progress = min(st.session_state.monitor.current_epoch / st.session_state.monitor.total_epochs, 1.0)
+                                ui['progress'].progress(progress)
+                            ui['epoch_status'].metric(
+                                "Current Epoch",
+                                f"{st.session_state.monitor.current_epoch}/{st.session_state.monitor.total_epochs}"
+                            )
+                            ui['loss_metric'].metric("Current Loss", f"{st.session_state.monitor.current_loss:.4f}")
+                            
+                            # Give Streamlit a chance to update
+                            time.sleep(0.1)
+                            
+                        except queue.Empty:
+                            time.sleep(0.1)
+                            continue
+                        
+                    # Check final status
+                    if st.session_state.monitor.process.returncode == 0:
+                        st.success("Training completed successfully!")
+                    else:
+                        st.error("Training failed. Check error log for details.")
+                        
+                except Exception as e:
+                    st.error(f"Error during training: {str(e)}")
+            else:
+                st.error("Please generate training command first")
 
 if __name__ == "__main__":
     main()
