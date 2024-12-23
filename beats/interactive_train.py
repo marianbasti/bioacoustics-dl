@@ -335,24 +335,24 @@ def main():
                     timeout_counter = 0
                     
                     # Monitor training progress
-                    while (st.session_state.monitor.process and 
-                           st.session_state.monitor.process.poll() is None):
+                    while True:
                         try:
-                            # Show debug info
-                            debug_output.code('\n'.join(st.session_state.monitor.debug_info))
+                            # Show debug info periodically
+                            debug_output.code('\n'.join(st.session_state.monitor.debug_info[-100:]))  # Show last 100 lines
                             
-                            # Check if process has started producing output
-                            if not training_started:
-                                if timeout_counter > 50:  # 5 seconds timeout
-                                    st.error("Training process failed to start producing output")
-                                    st.code('\n'.join(st.session_state.monitor.debug_info))
-                                    break
-                                timeout_counter += 1
+                            # Check if process is still running
+                            if st.session_state.monitor.process is None:
+                                break
+                                
+                            if st.session_state.monitor.process.poll() is not None:
+                                # Process has finished
+                                break
                             
                             # Get output from queue
                             try:
-                                stream, line = st.session_state.monitor.output_queue.get_nowait()
+                                stream, line = st.session_state.monitor.output_queue.get(timeout=0.1)
                                 training_started = True  # We got output
+                                timeout_counter = 0  # Reset timeout counter
                                 
                                 # Process output
                                 if stream == 'stdout':
@@ -369,28 +369,34 @@ def main():
                                         ui['error_log'].code('\n'.join(error_buffer))
                                 
                             except queue.Empty:
+                                # Check timeout only if training hasn't started
+                                if not training_started:
+                                    timeout_counter += 1
+                                    if timeout_counter > 50:  # 5 seconds timeout
+                                        st.error("Training process failed to start producing output")
+                                        break
                                 time.sleep(0.1)
                                 continue
                                 
                         except Exception as e:
                             st.error(f"Error monitoring training: {str(e)}")
-                            st.code('\n'.join(st.session_state.monitor.debug_info))
                             break
                     
-                    # Check final status
-                    return_code = st.session_state.monitor.process.returncode if st.session_state.monitor.process else None
-                    st.write(f"Process return code: {return_code}")
-                    
-                    if return_code == 0:
-                        st.success("Training completed successfully!")
-                    else:
-                        st.error("Training failed. Check debug output below:")
-                        st.code('\n'.join(st.session_state.monitor.debug_info))
+                    # Only show final status if the process has actually finished
+                    if st.session_state.monitor.process and st.session_state.monitor.process.poll() is not None:
+                        return_code = st.session_state.monitor.process.returncode
+                        if return_code == 0:
+                            st.success("Training completed successfully!")
+                        else:
+                            st.error(f"Training failed with return code {return_code}. Check debug output below:")
+                            st.code('\n'.join(st.session_state.monitor.debug_info[-100:]))
+                    elif training_started:
+                        st.info("Training is running...")
                         
                 except Exception as e:
                     st.error(f"Error during training setup: {str(e)}")
                     if st.session_state.monitor.debug_info:
-                        st.code('\n'.join(st.session_state.monitor.debug_info))
+                        st.code('\n'.join(st.session_state.monitor.debug_info[-100:]))
             else:
                 st.error("Please generate training command first")
 
