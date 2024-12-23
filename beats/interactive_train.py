@@ -39,90 +39,6 @@ def configure_accelerate(num_gpus):
     
     return config_path
 
-def display_training_progress(process, log_placeholder, progress_bar=None):
-    """Handle training progress display with better parsing of outputs"""
-    while True:
-        output = process.stdout.readline()
-        if output == '' and process.poll() is not None:
-            break
-            
-        if output:
-            output = output.strip()
-            # Parse progress information
-            if "Epoch" in output:
-                try:
-                    # Extract epoch number
-                    epoch_num = int(output.split("Epoch")[1].split(",")[0])
-                    if progress_bar is not None:
-                        progress_bar.progress(epoch_num / total_epochs)
-                except:
-                    pass
-                    
-            # Update log display
-            log_placeholder.text(output)
-            
-            # Display loss values in metrics
-            if "Loss:" in output:
-                try:
-                    loss_value = float(output.split("Loss:")[1].split()[0])
-                    st.metric("Current Loss", f"{loss_value:.4f}")
-                except:
-                    pass
-
-def launch_training(cmd, num_gpus, total_epochs):
-    """Handle the complete training launch process"""
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        # Create placeholder for logs
-        log_placeholder = st.empty()
-        
-        # Progress bar for epochs
-        progress = st.progress(0)
-        
-        # Metrics container
-        metrics_container = st.empty()
-    
-    with col2:
-        # Training control buttons
-        if st.button("Stop Training"):
-            st.session_state.stop_training = True
-            return
-    
-    try:
-        # Configure accelerate first
-        with st.spinner("Configuring Accelerate..."):
-            config_path = configure_accelerate(num_gpus)
-            st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
-        
-        # Start training process
-        log_placeholder.info("Starting training...")
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            bufsize=1
-        )
-        
-        # Monitor training progress
-        display_training_progress(
-            process, 
-            log_placeholder,
-            progress_bar=progress
-        )
-        
-        # Check final status
-        rc = process.poll()
-        if rc == 0:
-            st.success("Training completed successfully!")
-        else:
-            st.error("Training failed. Check logs for details.")
-            
-    except Exception as e:
-        st.error(f"Error during training: {str(e)}")
-
 def main():
     st.title("BEATs Training Interface")
     
@@ -260,11 +176,45 @@ def main():
         
         # Execute button
         if st.button("Start Training"):
-            # Initialize training state
-            if 'stop_training' not in st.session_state:
-                st.session_state.stop_training = False
+            try:
+                with st.spinner("Configuring Accelerate..."):
+                    config_path = configure_accelerate(num_gpus)
+                    st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
                 
-            launch_training(cmd, num_gpus, epochs)
+                progress_bar = st.progress(0)
+                st.info("Starting training...")
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True
+                )
+                
+                # Create a placeholder for logs
+                log_placeholder = st.empty()
+                
+                # Stream output
+                while True:
+                    output = process.stdout.readline()
+                    if output == '' and process.poll() is not None:
+                        break
+                    if output.startswith("PROGRESS"):
+                        # Format: PROGRESS epoch,batch_idx,total
+                        _, ep, current, total = output.strip().split(",")
+                        fraction = int(current) / int(total)
+                        progress_bar.progress(fraction)
+                        continue
+                    if output:
+                        log_placeholder.text(output.strip())
+                        
+                rc = process.poll()
+                if rc == 0:
+                    st.success("Training completed successfully!")
+                else:
+                    st.error("Training failed. Check logs for details.")
+                    
+            except Exception as e:
+                st.error(f"Error during training: {str(e)}")
 
 if __name__ == "__main__":
     main()
