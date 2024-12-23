@@ -236,7 +236,7 @@ def main():
     
     # Generate command button in first column
     if col_buttons[0].button("Generate Training Command"):
-        cmd = ["accelerate", "launch", "train.py"]
+        cmd = ["accelerate", "launch", "--config_file=~/.cache/huggingface/accelerate/default_config.yaml" "train.py"]
         
         # Basic parameters
         cmd.extend([
@@ -295,7 +295,6 @@ def main():
         }
         
         config_path = save_config(config)
-        cmd.insert(2, f"--config_file={config_path}")
         st.session_state.cmd = cmd
         st.session_state.config_saved = True
         st.code(" ".join(cmd))
