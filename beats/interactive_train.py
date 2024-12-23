@@ -299,8 +299,8 @@ def main():
         st.session_state.config_saved = True
         st.code(" ".join(cmd))
         st.success(f"Configuration saved to: {config_path}")
-
-    # Start/Stop training button in second column
+        st.session_state.project_dir = os.path.dirname(os.path.abspath(__file__))
+    
     if st.session_state.monitor.process and st.session_state.monitor.process.poll() is None:
         # Show stop button if training is running
         if col_buttons[1].button("Stop Training"):
