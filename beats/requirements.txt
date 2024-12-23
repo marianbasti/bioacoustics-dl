@@ -9,6 +9,7 @@ matplotlib
 cupy-cuda12x
 cuml-cu12 --extra-index-url=https://pypi.ngc.nvidia.com
 streamlit
+pyyaml
 plotly
 pandas
 seaborn
