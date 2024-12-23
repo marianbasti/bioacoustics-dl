@@ -220,7 +220,7 @@ def main():
                 st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
             
             # Create command
-            cmd = ["accelerate", "launch", "train.py"]
+            cmd = ["accelerate", "launch", "beats/train.py"]
             cmd.extend([
                 f"--data_dir={data_dir}",
                 f"--output_dir={output_dir}",
@@ -254,15 +254,23 @@ def main():
                     f"--target_length={target_length}"
                 ])
             
-            # Create UI elements
-            status_area = st.empty()
-            col1, col2, col3 = st.columns(3)
-            progress_bar = st.progress(0)
-            metrics_placeholder = st.empty()
-            log_placeholder = st.empty()
-            warning_placeholder = st.empty()
+            # Create persistent UI containers
+            status_container = st.empty()
+            metric_containers = st.columns(3)
+            progress_container = st.empty()
+            metrics_container = st.empty()
+            log_container = st.empty()
+            warning_container = st.empty()
             
-            status_area.info("Starting training...")
+            # Initialize metric displays
+            with metric_containers[0]:
+                epoch_metric = st.empty()
+            with metric_containers[1]:
+                batch_metric = st.empty()
+            with metric_containers[2]:
+                loss_metric = st.empty()
+            
+            status_container.info("Starting training...")
             
             # Start training
             st.session_state.monitor.start_training(cmd, epochs)
@@ -295,36 +303,33 @@ def main():
                 for line in outputs:
                     if st.session_state.monitor.is_warning(line):
                         warnings.append(line.strip())
-                        warning_placeholder.text("Latest warning: " + line.strip())
+                        warning_container.text("Latest warning: " + line.strip())
                     elif st.session_state.monitor.is_error(line):
                         has_error = True
-                        status_area.error(line.strip())
+                        status_container.error(line.strip())
                     else:
                         # Update metrics and display
                         st.session_state.monitor.update_metrics(line)
                         metrics = st.session_state.monitor.metrics
                         
-                        # Update UI
-                        status_area.info(f"Training in progress... Epoch {metrics.epoch + 1}/{epochs}")
-                        with col1:
-                            st.metric("Epoch", f"{metrics.epoch + 1}/{epochs}")
-                        with col2:
-                            st.metric("Batch", metrics.batch)
-                        with col3:
-                            st.metric("Loss", f"{metrics.loss:.4f}")
+                        # Update UI with persistent containers
+                        status_container.info(f"Training in progress... Epoch {metrics.epoch + 1}/{epochs}")
+                        epoch_metric.metric("Epoch", f"{metrics.epoch + 1}/{epochs}")
+                        batch_metric.metric("Batch", metrics.batch)
+                        loss_metric.metric("Loss", f"{metrics.loss:.4f}")
                         
-                        progress_bar.progress(metrics.progress)
-                        metrics_placeholder.json(st.session_state.monitor.metrics.__dict__)
-                        log_placeholder.text(line.strip())
+                        progress_container.progress(metrics.progress)
+                        metrics_container.json(st.session_state.monitor.metrics.__dict__)
+                        log_container.text(line.strip())
                 
                 time.sleep(0.1)
             
             # Check final status
             rc = st.session_state.monitor.process.poll()
             if rc == 0 and not has_error:
-                status_area.success("Training completed successfully!")
+                status_container.success("Training completed successfully!")
             else:
-                status_area.error("Training failed. Check logs for details.")
+                status_container.error("Training failed. Check logs for details.")
                 if warnings:
                     with st.expander("Show warnings"):
                         for w in warnings:
