@@ -236,8 +236,7 @@ def main():
     
     # Generate command button in first column
     if col_buttons[0].button("Generate Training Command"):
-        config_path = save_config(config)
-        cmd = ["accelerate", "launch", "--config_file", config_path, "train.py"]
+        cmd = ["accelerate", "launch", "train.py"]
         
         # Basic parameters
         cmd.extend([
@@ -296,6 +295,7 @@ def main():
         }
         
         config_path = save_config(config)
+        cmd.insert(2, f"--config_file={config_path}")
         st.session_state.cmd = cmd
         st.session_state.config_saved = True
         st.code(" ".join(cmd))
