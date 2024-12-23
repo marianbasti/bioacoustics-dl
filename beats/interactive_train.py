@@ -39,6 +39,44 @@ def configure_accelerate(num_gpus):
     
     return config_path
 
+def monitor_training(process, log_placeholder, progress_bar):
+    """Monitor training progress and update Streamlit UI"""
+    try:
+        while True:
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            
+            if output:
+                # Parse progress information
+                if "Epoch" in output and "Batch" in output and "Loss:" in output:
+                    try:
+                        # Extract epoch and loss info
+                        parts = output.split()
+                        epoch = int(parts[parts.index("Epoch") + 1])
+                        loss = float(parts[parts.index("Loss:") + 1])
+                        
+                        # Update progress bar
+                        progress = (epoch) / total_epochs
+                        progress_bar.progress(progress)
+                        
+                        # Show current stats
+                        stats_cols = st.columns(3)
+                        with stats_cols[0]:
+                            st.metric("Current Epoch", epoch)
+                        with stats_cols[1]:
+                            st.metric("Current Loss", f"{loss:.4f}")
+                        with stats_cols[2]:
+                            st.metric("Progress", f"{progress*100:.1f}%")
+                            
+                    except (ValueError, IndexError):
+                        pass
+                
+                # Always update log
+                log_placeholder.text(output.strip())
+    except Exception as e:
+        st.error(f"Error monitoring training: {str(e)}")
+
 def main():
     st.title("BEATs Training Interface")
     
@@ -182,32 +220,59 @@ def main():
                     st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
                 
                 st.info("Starting training...")
+                
+                # Create container for training monitoring
+                monitor_container = st.container()
+                with monitor_container:
+                    st.subheader("Training Progress")
+                    progress_bar = st.progress(0.0)
+                    log_placeholder = st.empty()
+                    
+                    # Create expander for detailed logs
+                    with st.expander("Detailed Logs", expanded=False):
+                        detailed_logs = st.empty()
+                
+                # Launch training process
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    universal_newlines=True
+                    universal_newlines=True,
+                    bufsize=1  # Line buffered
                 )
                 
-                # Create a placeholder for logs
-                log_placeholder = st.empty()
+                # Monitor training in the UI
+                monitor_training(process, log_placeholder, progress_bar)
                 
-                # Stream output
-                while True:
-                    output = process.stdout.readline()
-                    if output == '' and process.poll() is not None:
-                        break
-                    if output:
-                        log_placeholder.text(output.strip())
-                        
+                # Check final status
                 rc = process.poll()
                 if rc == 0:
                     st.success("Training completed successfully!")
+                    
+                    # Show final model location
+                    final_model = os.path.join(output_dir, "checkpoint_final.pt")
+                    if os.path.exists(final_model):
+                        st.info(f"Final model saved to: {final_model}")
                 else:
-                    st.error("Training failed. Check logs for details.")
+                    st.error("Training failed. Check detailed logs for more information.")
+                    
+                    # Show error output if available
+                    error_output = process.stderr.read()
+                    if error_output:
+                        with st.expander("Error Details"):
+                            st.code(error_output)
                     
             except Exception as e:
                 st.error(f"Error during training: {str(e)}")
+                raise e
+            finally:
+                # Cleanup process if still running
+                if 'process' in locals() and process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
 
 if __name__ == "__main__":
     main()
