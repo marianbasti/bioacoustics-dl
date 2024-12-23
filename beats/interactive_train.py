@@ -25,6 +25,26 @@ class TrainingMonitor:
         self.metrics = TrainingMetrics()
         self.total_epochs = 0
         self.total_batches = 0
+        self.error_patterns = [
+            "Error:",
+            "Exception:",
+            "Traceback",
+            "RuntimeError:",
+            "CUDA out of memory"
+        ]
+        self.warning_patterns = [
+            "Warning:",
+            "UserWarning:",
+            "torch.distributed"
+        ]
+        
+    def is_error(self, line: str) -> bool:
+        """Check if log line indicates an error"""
+        return any(pattern in line for pattern in self.error_patterns)
+        
+    def is_warning(self, line: str) -> bool:
+        """Check if log line is just a warning"""
+        return any(pattern in line for pattern in self.warning_patterns)
         
     def parse_log_line(self, line: str) -> Dict:
         """Parse metrics from log line"""
@@ -47,13 +67,14 @@ class TrainingMonitor:
         return metrics
     
     def start_training(self, cmd, total_epochs):
-        """Start training process"""
+        """Start training process with both stdout and stderr pipes"""
         self.total_epochs = total_epochs
         self.process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
+            bufsize=1,  # Line buffered
             preexec_fn=os.setsid
         )
         
@@ -233,46 +254,81 @@ def main():
                     f"--target_length={target_length}"
                 ])
             
-            # Create columns for metrics
+            # Create UI elements
+            status_area = st.empty()
             col1, col2, col3 = st.columns(3)
             progress_bar = st.progress(0)
             metrics_placeholder = st.empty()
             log_placeholder = st.empty()
+            warning_placeholder = st.empty()
+            
+            status_area.info("Starting training...")
             
             # Start training
             st.session_state.monitor.start_training(cmd, epochs)
             
+            # Collect warnings separately
+            warnings = []
+            has_error = False
+            
             # Monitor training progress
             while st.session_state.monitor.process:
+                # Check both stdout and stderr
+                outputs = []
+                
+                # Read from stdout (non-blocking)
                 output = st.session_state.monitor.process.stdout.readline()
-                if output == '' and st.session_state.monitor.process.poll() is not None:
+                if output:
+                    outputs.append(output)
+                
+                # Read from stderr (non-blocking)
+                error = st.session_state.monitor.process.stderr.readline()
+                if error:
+                    outputs.append(error)
+                
+                # Check if process has finished
+                if (not output and not error and 
+                    st.session_state.monitor.process.poll() is not None):
                     break
                 
-                if output:
-                    # Update metrics
-                    st.session_state.monitor.update_metrics(output)
-                    metrics = st.session_state.monitor.metrics
-                    
-                    # Update UI
-                    with col1:
-                        st.metric("Epoch", f"{metrics.epoch + 1}/{epochs}")
-                    with col2:
-                        st.metric("Batch", metrics.batch)
-                    with col3:
-                        st.metric("Loss", f"{metrics.loss:.4f}")
-                    
-                    progress_bar.progress(metrics.progress)
-                    metrics_placeholder.json(st.session_state.monitor.metrics.__dict__)
-                    log_placeholder.text(output.strip())
+                # Process outputs
+                for line in outputs:
+                    if st.session_state.monitor.is_warning(line):
+                        warnings.append(line.strip())
+                        warning_placeholder.text("Latest warning: " + line.strip())
+                    elif st.session_state.monitor.is_error(line):
+                        has_error = True
+                        status_area.error(line.strip())
+                    else:
+                        # Update metrics and display
+                        st.session_state.monitor.update_metrics(line)
+                        metrics = st.session_state.monitor.metrics
+                        
+                        # Update UI
+                        status_area.info(f"Training in progress... Epoch {metrics.epoch + 1}/{epochs}")
+                        with col1:
+                            st.metric("Epoch", f"{metrics.epoch + 1}/{epochs}")
+                        with col2:
+                            st.metric("Batch", metrics.batch)
+                        with col3:
+                            st.metric("Loss", f"{metrics.loss:.4f}")
+                        
+                        progress_bar.progress(metrics.progress)
+                        metrics_placeholder.json(st.session_state.monitor.metrics.__dict__)
+                        log_placeholder.text(line.strip())
                 
                 time.sleep(0.1)
             
             # Check final status
             rc = st.session_state.monitor.process.poll()
-            if rc == 0:
-                st.success("Training completed successfully!")
+            if rc == 0 and not has_error:
+                status_area.success("Training completed successfully!")
             else:
-                st.error("Training failed. Check logs for details.")
+                status_area.error("Training failed. Check logs for details.")
+                if warnings:
+                    with st.expander("Show warnings"):
+                        for w in warnings:
+                            st.warning(w)
             
         except Exception as e:
             st.error(f"Error during training: {str(e)}")
