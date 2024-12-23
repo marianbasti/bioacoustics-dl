@@ -90,20 +90,20 @@ class TrainingMonitor:
             self._cleanup_handler_registered = True
             
         try:
+            # Create process without preexec_fn and start_new_session
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
                 bufsize=1,  # Line buffered
-                preexec_fn=os.setsid,
-                start_new_session=True  # Create new session
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
             )
         except Exception as e:
             st.error(f"Failed to start training process: {str(e)}")
             self.process = None
             raise
-        
+    
     def stop_training(self):
         """Stop training process and all its children gracefully"""
         if self.process:
@@ -111,19 +111,28 @@ class TrainingMonitor:
                 # Try to stop all child processes
                 processes = self._find_process_children()
                 
-                # Send SIGTERM to process group
-                pgid = os.getpgid(self.process.pid)
-                os.killpg(pgid, signal.SIGTERM)
+                # Send termination signal appropriate for the platform
+                if os.name == 'nt':
+                    self.process.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    self.process.terminate()
                 
                 # Wait briefly for graceful shutdown
-                self.process.wait(timeout=5)
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
                 
-            except (ProcessLookupError, psutil.NoSuchProcess):
-                pass  # Process already terminated
             except Exception as e:
                 st.warning(f"Error during process cleanup: {str(e)}")
             finally:
                 # Force kill any remaining processes
+                if self.process.poll() is None:
+                    try:
+                        self.process.kill()
+                    except:
+                        pass
+                
                 for proc in self._find_process_children():
                     try:
                         proc.kill()
