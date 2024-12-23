@@ -378,8 +378,6 @@ def main():
         device=accelerator.device
     )
 
-    num_batches = len(dataloader)
-
     logger.info("Starting training loop")
     # Training loop
     for epoch in range(args.epochs):
@@ -444,8 +442,6 @@ def main():
             
             if batch_idx % 10 == 0:
                 logger.info(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.4f}")
-            
-            logger.info(f"PROGRESS {epoch},{batch_idx + 1},{num_batches}")
         
         avg_loss = total_loss / len(dataloader)
         logger.info(f"Epoch {epoch} completed, Average Loss: {avg_loss:.4f}")

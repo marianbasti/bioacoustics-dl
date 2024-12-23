@@ -5,6 +5,78 @@ import torch
 from pathlib import Path
 import yaml
 import tempfile
+import re
+import time
+import signal
+from dataclasses import dataclass
+from typing import Optional, Dict
+
+@dataclass
+class TrainingMetrics:
+    epoch: int = 0
+    batch: int = 0
+    loss: float = 0.0
+    epoch_loss: float = 0.0
+    progress: float = 0.0
+    
+class TrainingMonitor:
+    def __init__(self):
+        self.process: Optional[subprocess.Popen] = None
+        self.metrics = TrainingMetrics()
+        self.total_epochs = 0
+        self.total_batches = 0
+        
+    def parse_log_line(self, line: str) -> Dict:
+        """Parse metrics from log line"""
+        metrics = {}
+        # Match epoch info
+        epoch_match = re.search(r"Epoch (\d+)", line)
+        if epoch_match:
+            metrics['epoch'] = int(epoch_match.group(1))
+            
+        # Match batch info
+        batch_match = re.search(r"Batch (\d+)", line)
+        if batch_match:
+            metrics['batch'] = int(batch_match.group(1))
+            
+        # Match loss value
+        loss_match = re.search(r"Loss: (\d+\.\d+)", line)
+        if loss_match:
+            metrics['loss'] = float(loss_match.group(1))
+            
+        return metrics
+    
+    def start_training(self, cmd, total_epochs):
+        """Start training process"""
+        self.total_epochs = total_epochs
+        self.process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            preexec_fn=os.setsid
+        )
+        
+    def stop_training(self):
+        """Stop training process gracefully"""
+        if self.process:
+            os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+            self.process = None
+            
+    def update_metrics(self, log_line: str):
+        """Update metrics from log line"""
+        parsed = self.parse_log_line(log_line)
+        if parsed:
+            if 'epoch' in parsed:
+                self.metrics.epoch = parsed['epoch']
+            if 'batch' in parsed:
+                self.metrics.batch = parsed['batch']
+            if 'loss' in parsed:
+                self.metrics.loss = parsed['loss']
+                
+            # Calculate progress
+            self.metrics.progress = (self.metrics.epoch + 
+                                   (self.metrics.batch / self.total_batches if self.total_batches else 0)) / self.total_epochs
 
 def get_available_gpus():
     if torch.cuda.is_available():
@@ -41,6 +113,10 @@ def configure_accelerate(num_gpus):
 
 def main():
     st.title("BEATs Training Interface")
+    
+    # Initialize session state for training monitor
+    if 'monitor' not in st.session_state:
+        st.session_state.monitor = TrainingMonitor()
     
     with st.sidebar:
         st.header("Training Mode")
@@ -108,113 +184,99 @@ def main():
         encoder_layers = st.number_input("Encoder Layers", min_value=1, value=12)
         encoder_embed_dim = st.number_input("Encoder Embedding Dimension", min_value=64, value=768)
         
+    # Add stop button if training is in progress
+    if st.session_state.monitor.process:
+        if st.button("Stop Training"):
+            st.session_state.monitor.stop_training()
+            st.error("Training stopped by user")
+            st.rerun()
+    
     # Generate command button
-    if st.button("Generate Training Command"):
-        cmd = ["accelerate", "launch", "train.py"]
-        
-        # Basic parameters
-        cmd.extend([
-            f"--data_dir={data_dir}",
-            f"--output_dir={output_dir}",
-            f"--batch_size={batch_size}",
-            f"--epochs={epochs}",
-            f"--lr={learning_rate}",
-            f"--segment_duration={segment_duration}",
-            f"--checkpoint_freq={checkpoint_freq}",
-            f"--gradient_accumulation_steps={grad_accum_steps}",
-            f"--encoder_layers={encoder_layers}",
-            f"--encoder_embed_dim={encoder_embed_dim}"
-        ])
-        
-        # Optional paths
-        if model_path:
-            cmd.append(f"--model_path={model_path}")
-        if training_mode == "Supervised":
-            cmd.extend([
-                f"--labeled_dir={labeled_dir}",
-                f"--supervised_weight={supervised_weight}"
-            ])
-        if positive_dir:
-            cmd.append(f"--positive_dir={positive_dir}")
-        if negative_dir:
-            cmd.append(f"--negative_dir={negative_dir}")
+    if st.button("Start Training"):
+        try:
+            with st.spinner("Configuring Accelerate..."):
+                config_path = configure_accelerate(num_gpus)
+                st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
             
-        # Pre-training specific
-        if training_mode == "Pre-training":
+            # Create command
+            cmd = ["accelerate", "launch", "train.py"]
             cmd.extend([
-                f"--mask_ratio={mask_ratio}",
-                f"--target_length={target_length}"
+                f"--data_dir={data_dir}",
+                f"--output_dir={output_dir}",
+                f"--batch_size={batch_size}",
+                f"--epochs={epochs}",
+                f"--lr={learning_rate}",
+                f"--segment_duration={segment_duration}",
+                f"--checkpoint_freq={checkpoint_freq}",
+                f"--gradient_accumulation_steps={grad_accum_steps}",
+                f"--encoder_layers={encoder_layers}",
+                f"--encoder_embed_dim={encoder_embed_dim}"
             ])
-        
-        # Display command
-        st.code(" ".join(cmd))
-        
-        # Save configuration
-        config = {
-            "training_mode": training_mode,
-            "data_config": {
-                "data_dir": data_dir,
-                "output_dir": output_dir,
-                "model_path": model_path,
-            },
-            "training_params": {
-                "epochs": epochs,
-                "batch_size": batch_size,
-                "learning_rate": learning_rate,
-                "segment_duration": segment_duration,
-                "checkpoint_freq": checkpoint_freq,
-                "gradient_accumulation_steps": grad_accum_steps,
-            },
-            "model_architecture": {
-                "encoder_layers": encoder_layers,
-                "encoder_embed_dim": encoder_embed_dim,
-            }
-        }
-        
-        config_path = save_config(config)
-        st.success(f"Configuration saved to: {config_path}")
-        
-        # Execute button
-        if st.button("Start Training"):
-            try:
-                with st.spinner("Configuring Accelerate..."):
-                    config_path = configure_accelerate(num_gpus)
-                    st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
+            
+            # Optional paths
+            if model_path:
+                cmd.append(f"--model_path={model_path}")
+            if training_mode == "Supervised":
+                cmd.extend([
+                    f"--labeled_dir={labeled_dir}",
+                    f"--supervised_weight={supervised_weight}"
+                ])
+            if positive_dir:
+                cmd.append(f"--positive_dir={positive_dir}")
+            if negative_dir:
+                cmd.append(f"--negative_dir={negative_dir}")
                 
-                progress_bar = st.progress(0)
-                st.info("Starting training...")
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    universal_newlines=True
-                )
+            # Pre-training specific
+            if training_mode == "Pre-training":
+                cmd.extend([
+                    f"--mask_ratio={mask_ratio}",
+                    f"--target_length={target_length}"
+                ])
+            
+            # Create columns for metrics
+            col1, col2, col3 = st.columns(3)
+            progress_bar = st.progress(0)
+            metrics_placeholder = st.empty()
+            log_placeholder = st.empty()
+            
+            # Start training
+            st.session_state.monitor.start_training(cmd, epochs)
+            
+            # Monitor training progress
+            while st.session_state.monitor.process:
+                output = st.session_state.monitor.process.stdout.readline()
+                if output == '' and st.session_state.monitor.process.poll() is not None:
+                    break
                 
-                # Create a placeholder for logs
-                log_placeholder = st.empty()
-                
-                # Stream output
-                while True:
-                    output = process.stdout.readline()
-                    if output == '' and process.poll() is not None:
-                        break
-                    if output.startswith("PROGRESS"):
-                        # Format: PROGRESS epoch,batch_idx,total
-                        _, ep, current, total = output.strip().split(",")
-                        fraction = int(current) / int(total)
-                        progress_bar.progress(fraction)
-                        continue
-                    if output:
-                        log_placeholder.text(output.strip())
-                        
-                rc = process.poll()
-                if rc == 0:
-                    st.success("Training completed successfully!")
-                else:
-                    st.error("Training failed. Check logs for details.")
+                if output:
+                    # Update metrics
+                    st.session_state.monitor.update_metrics(output)
+                    metrics = st.session_state.monitor.metrics
                     
-            except Exception as e:
-                st.error(f"Error during training: {str(e)}")
+                    # Update UI
+                    with col1:
+                        st.metric("Epoch", f"{metrics.epoch + 1}/{epochs}")
+                    with col2:
+                        st.metric("Batch", metrics.batch)
+                    with col3:
+                        st.metric("Loss", f"{metrics.loss:.4f}")
+                    
+                    progress_bar.progress(metrics.progress)
+                    metrics_placeholder.json(st.session_state.monitor.metrics.__dict__)
+                    log_placeholder.text(output.strip())
+                
+                time.sleep(0.1)
+            
+            # Check final status
+            rc = st.session_state.monitor.process.poll()
+            if rc == 0:
+                st.success("Training completed successfully!")
+            else:
+                st.error("Training failed. Check logs for details.")
+            
+        except Exception as e:
+            st.error(f"Error during training: {str(e)}")
+            st.session_state.monitor.stop_training()
 
 if __name__ == "__main__":
     main()
