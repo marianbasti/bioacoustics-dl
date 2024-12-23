@@ -10,6 +10,8 @@ import time
 import signal
 from dataclasses import dataclass
 from typing import Optional, Dict
+import psutil  # Add this import
+import atexit
 
 @dataclass
 class TrainingMetrics:
@@ -37,7 +39,18 @@ class TrainingMonitor:
             "UserWarning:",
             "torch.distributed"
         ]
-        self.terminated = False
+        self._cleanup_handler_registered = False
+        
+    def _find_process_children(self):
+        """Find all child processes of the training process"""
+        if not self.process:
+            return []
+        try:
+            parent = psutil.Process(self.process.pid)
+            children = parent.children(recursive=True)
+            return [parent] + children
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return []
         
     def is_error(self, line: str) -> bool:
         """Check if log line indicates an error"""
@@ -70,32 +83,55 @@ class TrainingMonitor:
     def start_training(self, cmd, total_epochs):
         """Start training process with both stdout and stderr pipes"""
         self.total_epochs = total_epochs
-        self.terminated = False
-        self.process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            bufsize=1,  # Line buffered
-            preexec_fn=os.setsid
-        )
+        
+        # Register cleanup handler only once
+        if not self._cleanup_handler_registered:
+            atexit.register(self.stop_training)
+            self._cleanup_handler_registered = True
+            
+        try:
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                bufsize=1,  # Line buffered
+                preexec_fn=os.setsid,
+                start_new_session=True  # Create new session
+            )
+        except Exception as e:
+            st.error(f"Failed to start training process: {str(e)}")
+            self.process = None
+            raise
         
     def stop_training(self):
-        """Stop training process gracefully"""
-        if self.process and not self.terminated:
+        """Stop training process and all its children gracefully"""
+        if self.process:
             try:
-                # Check if process is still running
-                if self.process.poll() is None:
-                    os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                    # Give process time to terminate
-                    self.process.wait(timeout=5)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                # Process already terminated or timeout occurred
-                pass
+                # Try to stop all child processes
+                processes = self._find_process_children()
+                
+                # Send SIGTERM to process group
+                pgid = os.getpgid(self.process.pid)
+                os.killpg(pgid, signal.SIGTERM)
+                
+                # Wait briefly for graceful shutdown
+                self.process.wait(timeout=5)
+                
+            except (ProcessLookupError, psutil.NoSuchProcess):
+                pass  # Process already terminated
+            except Exception as e:
+                st.warning(f"Error during process cleanup: {str(e)}")
             finally:
-                self.terminated = True
+                # Force kill any remaining processes
+                for proc in self._find_process_children():
+                    try:
+                        proc.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                
                 self.process = None
-            
+                
     def update_metrics(self, log_line: str):
         """Update metrics from log line"""
         parsed = self.parse_log_line(log_line)
@@ -218,11 +254,13 @@ def main():
         encoder_embed_dim = st.number_input("Encoder Embedding Dimension", min_value=64, value=768)
         
     # Add stop button if training is in progress
-    if st.session_state.monitor.process and not st.session_state.monitor.terminated:
-        if st.button("Stop Training"):
-            st.session_state.monitor.stop_training()
-            st.error("Training stopped by user")
-            st.rerun()
+    if st.session_state.monitor.process:
+        if st.button("Stop Training", key="stop_button"):
+            with st.spinner("Stopping training..."):
+                st.session_state.monitor.stop_training()
+                st.error("Training stopped by user")
+                time.sleep(1)  # Brief pause to ensure cleanup
+                st.rerun()
     
     # Generate command button
     if st.button("Start Training"):
@@ -255,15 +293,15 @@ def main():
                     f"--supervised_weight={supervised_weight}"
                 ])
             if positive_dir:
-                cmd.append(f("--positive_dir={positive_dir}"))
+                cmd.append(f"--positive_dir={positive_dir}")
             if negative_dir:
-                cmd.append(f("--negative_dir={negative_dir}"))
+                cmd.append(f"--negative_dir={negative_dir}")
                 
             # Pre-training specific
             if training_mode == "Pre-training":
                 cmd.extend([
-                    f("--mask_ratio={mask_ratio}"),
-                    f("--target_length={target_length}")
+                    f"--mask_ratio={mask_ratio}",
+                    f"--target_length={target_length}"
                 ])
             
             # Create persistent UI containers with better layout
