@@ -1,6 +1,6 @@
 import streamlit as st
+import os
 import torch
-from pathlib import Path
 import yaml
 import tempfile
 import time
@@ -288,12 +288,11 @@ def main():
             st.warning("Training stopped by user")
         else:
             try:
-                # Create training config
+                # Create base training config with common parameters
                 config = {
                     "training_mode": training_mode,
                     "data_dir": data_dir,
                     "output_dir": output_dir,
-                    "model_path": model_path,
                     "batch_size": batch_size,
                     "epochs": epochs,
                     "learning_rate": learning_rate,
@@ -305,11 +304,27 @@ def main():
                     "num_gpus": num_gpus
                 }
 
+                # Add model path only if provided
+                if model_path:
+                    config["model_path"] = model_path
+
+                # Add mode-specific parameters
                 if training_mode == "Supervised":
                     config.update({
                         "labeled_dir": labeled_dir,
                         "supervised_weight": supervised_weight
                     })
+                elif training_mode == "Pre-training":
+                    config.update({
+                        "mask_ratio": mask_ratio,
+                        "target_length": target_length
+                    })
+
+                # Add optional directories if provided
+                if positive_dir:
+                    config["positive_dir"] = positive_dir
+                if negative_dir:
+                    config["negative_dir"] = negative_dir
 
                 # Setup UI components
                 ui = render_training_interface()
