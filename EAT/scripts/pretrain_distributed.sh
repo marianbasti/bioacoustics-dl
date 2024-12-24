@@ -116,13 +116,13 @@ if [ ! -z "$RESTORE_FILE" ]; then
 fi
 
 # Run distributed training
-python -m torch.distributed.launch \
+python -m torchrun \
     --use_env \
-    --nproc_per_node=$NPROC_PER_NODE \
-    --nnodes=$NNODES \
-    --node_rank=$NODE_RANK \
-    --master_addr=$MASTER_ADDR \
-    --master_port=$MASTER_PORT \
+    --nproc_per_node $NPROC_PER_NODE \
+    --nnodes $NNODES \
+    --node_rank $NODE_RANK \
+    --master_addr $MASTER_ADDR \
+    --master_port $MASTER_PORT \
     fairseq_cli/hydra_train.py \
     --config-dir EAT/config \
     --config-name pretraining_AS2M \
