@@ -347,17 +347,25 @@ def main(config, callback=None):
     
     # Setup dataset and dataloader
     logger.info(f"Loading dataset from {config['data_dir']}")
-    dataset = AudioDataset(
-        root_dir=config['data_dir'],
-        positive_dir=config['positive_dir'],
-        negative_dir=config['negative_dir'],  # Add negative_dir
-        labeled_dir=config['labeled_dir'],
-        segment_duration=config['segment_duration'],
-        overlap=0.01,  # 1% overlap between segments
-        max_segments_per_file=6,  # Limit segments per file
-        random_segments=False  # Randomly select segments
-    )
+    dataset_kwargs = {
+        'root_dir': config['data_dir'],
+        'segment_duration': config['segment_duration'],
+        'overlap': 0.01,  # 1% overlap between segments
+        'max_segments_per_file': 6,  # Limit segments per file
+        'random_segments': False  # Randomly select segments
+    }
+    
+    # Only add optional directories if they exist in config and are not None
+    if config.get('positive_dir'):
+        dataset_kwargs['positive_dir'] = config['positive_dir']
+    if config.get('negative_dir'):
+        dataset_kwargs['negative_dir'] = config['negative_dir']
+    if config.get('labeled_dir'):
+        dataset_kwargs['labeled_dir'] = config['labeled_dir']
+        
+    dataset = AudioDataset(**dataset_kwargs)
     logger.info(f"Dataset size: {len(dataset)} files")
+
     dataloader = DataLoader(
         dataset, 
         batch_size=config['batch_size'],
