@@ -16,6 +16,7 @@ from fairseq.tasks import FairseqTask
 from enum import Enum, auto
 
 from .mae import PatchEmbed,get_2d_sincos_pos_embed_flexible,PatchEmbed_new
+from .modules import D2vDecoderConfig
 
 
 from .base import (

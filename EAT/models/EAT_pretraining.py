@@ -48,7 +48,7 @@ class Modality(Enum):
 
 @dataclass
 class D2vModalitiesConfig(FairseqDataclass):
-    image: D2vImageConfig = D2vImageConfig()
+    image: D2vImageConfig = field(default_factory=D2vImageConfig)
     
 @dataclass
 class Data2VecMultiConfig(FairseqDataclass):
