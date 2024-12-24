@@ -14,6 +14,7 @@ LEARNING_RATE=1.5e-4
 UPDATE_FREQ=1
 PROJECT_DIR="$(pwd)"
 DATA_DIR="${PROJECT_DIR}/data/unlabeled"
+EAT_DIR="${PROJECT_DIR}/EAT"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -99,7 +100,7 @@ fi
 python fairseq_cli/hydra_train.py -m \
     --config-dir EAT/config \
     --config-name pretraining_AS2M \
-    common.user_dir EAT \
+    common.user_dir=$EAT_DIR \
     checkpoint.save_dir=$SAVE_DIR \
     $RESTORE_ARG \
     distributed_training.distributed_world_size=$WORLD_SIZE \
