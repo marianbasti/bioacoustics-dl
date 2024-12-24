@@ -27,13 +27,13 @@ def create_manifest(data_dir, split_ratio=0.9):
 
     # Create manifests
     for split, files in [("train", train_files), ("eval", eval_files)]:
-        with open(f"{split}.tsv", "w") as f:
-            print("path\tframes\tlabel", file=f)
+        manifest_path = data_dir.joinpath(f"{split}.tsv")
+        with open(manifest_path, "w") as f:
+            print("path\tframes", file=f)
             for wav_path in files:
                 frames = get_audio_info(wav_path)
-                label = wav_path.parent.name
                 rel_path = wav_path.relative_to(data_dir)
-                print(f"{rel_path}\t{frames}\t{label}", file=f)
+                print(f"{rel_path}\t{frames}", file=f)
 
 def main():
     parser = argparse.ArgumentParser()
