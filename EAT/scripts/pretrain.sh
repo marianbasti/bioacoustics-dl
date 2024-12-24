@@ -90,10 +90,6 @@ fi
 # Set CUDA devices
 export CUDA_VISIBLE_DEVICES=$CUDA_DEVICES
 
-# Count number of GPUs from CUDA_DEVICES
-IFS=',' read -ra GPU_ARRAY <<< "$CUDA_DEVICES"
-WORLD_SIZE=${#GPU_ARRAY[@]}
-
 # Construct restore file argument if provided
 RESTORE_ARG=""
 if [ ! -z "$RESTORE_FILE" ]; then
@@ -108,10 +104,6 @@ python fairseq_cli/hydra_train.py -m \
     checkpoint.save_dir=$SAVE_DIR \
     $RESTORE_ARG \
     distributed_training.distributed_world_size=$WORLD_SIZE \
-    distributed_training.distributed_init_method=tcp://localhost:12345 \
-    distributed_training.ddp_backend=c10d \
-    distributed_training.device_id=\$LOCAL_RANK \
-    common.tpu=false \
     optimization.max_update=$NUM_UPDATES \
     optimization.lr=[$LEARNING_RATE] \
     dataset.batch_size=$BATCH_SIZE \
