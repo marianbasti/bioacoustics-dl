@@ -1,16 +1,80 @@
 import streamlit as st
-import subprocess
-import os
 import torch
 from pathlib import Path
 import yaml
 import tempfile
 import time
-import re
 from datetime import datetime
 import queue
 import threading
-import signal
+from train import main as train_main  # Import the training function
+from dataclasses import dataclass
+from typing import Optional, Callable
+
+@dataclass
+class TrainingCallback:
+    """Callback interface for training progress updates"""
+    on_epoch_start: Optional[Callable[[int], None]] = None
+    on_epoch_end: Optional[Callable[[int, float], None]] = None
+    on_batch_end: Optional[Callable[[int, int, float], None]] = None
+    on_training_end: Optional[Callable[[float], None]] = None
+    should_stop: bool = False
+
+class TrainingMonitor:
+    def __init__(self):
+        self.current_epoch = 0
+        self.total_epochs = 0
+        self.current_batch = 0
+        self.total_batches = 0
+        self.current_loss = 0.0
+        self.training_thread = None
+        self.callback = None
+        self.output_queue = queue.Queue()
+        self.should_stop = False
+
+    def create_callback(self):
+        """Create training callback"""
+        def on_epoch_start(epoch):
+            self.current_epoch = epoch
+            self.output_queue.put(('info', f'Starting epoch {epoch}'))
+
+        def on_epoch_end(epoch, loss):
+            self.current_loss = loss
+            self.output_queue.put(('info', f'Epoch {epoch} finished with loss: {loss:.4f}'))
+
+        def on_batch_end(epoch, batch, loss):
+            self.current_batch = batch
+            self.current_loss = loss
+            self.output_queue.put(('info', f'Epoch {epoch}, Batch {batch}, Loss: {loss:.4f}'))
+
+        self.callback = TrainingCallback(
+            on_epoch_start=on_epoch_start,
+            on_epoch_end=on_epoch_end,
+            on_batch_end=on_batch_end
+        )
+        return self.callback
+
+    def start_training(self, config):
+        """Start training in a separate thread"""
+        def training_thread():
+            try:
+                train_main(config, self.create_callback())
+            except Exception as e:
+                self.output_queue.put(('error', f'Training failed: {str(e)}'))
+            finally:
+                self.output_queue.put(('info', 'Training finished'))
+
+        self.training_thread = threading.Thread(target=training_thread)
+        self.training_thread.start()
+
+    def stop_training(self):
+        """Stop training gracefully"""
+        if self.callback:
+            self.callback.should_stop = True
+        if self.training_thread:
+            self.training_thread.join()
+        self.training_thread = None
+        self.callback = None
 
 def get_available_gpus():
     if torch.cuda.is_available():
@@ -21,140 +85,6 @@ def save_config(config):
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.yaml') as f:
         yaml.dump(config, f)
         return f.name
-
-class TrainingMonitor:
-    def __init__(self):
-        self.process = None
-        self.output_queue = queue.Queue()
-        self.should_stop = False
-        self.current_epoch = 0
-        self.total_epochs = 0
-        self.current_batch = 0
-        self.total_batches = 0
-        self.current_loss = 0.0
-        self.debug_info = []  # Add debug info list
-        
-    def parse_training_line(self, line):
-        """Parse training output for progress information"""
-        try:
-            # Parse epoch information
-            epoch_match = re.search(r'Epoch (\d+)', line)
-            if epoch_match:
-                self.current_epoch = int(epoch_match.group(1))
-            
-            # Parse batch information
-            batch_match = re.search(r'Batch (\d+)', line)
-            if batch_match:
-                self.current_batch = int(batch_match.group(1))
-            
-            # Parse loss information
-            loss_match = re.search(r'Loss: (\d+\.\d+)', line)
-            if loss_match:
-                self.current_loss = float(loss_match.group(1))
-                
-        except Exception:
-            pass  # Silently handle parsing errors
-        
-    def stream_output(self, process):
-        """Stream process output to queue"""
-        while True:
-            if self.should_stop:
-                break
-
-            # Read from stdout
-            stdout_line = process.stdout.readline()
-            if stdout_line:
-                line = stdout_line.strip()
-                self.parse_training_line(line)
-                self.output_queue.put(('stdout', line + '\n'))
-                self.debug_info.append(f"STDOUT: {line}")
-
-            # Read from stderr
-            stderr_line = process.stderr.readline()
-            if stderr_line:
-                line = stderr_line.strip()
-                self.output_queue.put(('stderr', line + '\n'))
-                self.debug_info.append(f"STDERR: {line}")
-
-            # Check if process is still running
-            if process.poll() is not None and not stdout_line and not stderr_line:
-                break
-
-        process.stdout.close()
-        process.stderr.close()
-
-    def start_training(self, cmd):
-        """Start training process with output monitoring"""
-        self.should_stop = False
-        self.debug_info.append(f"Starting training with command: {' '.join(cmd)}")
-        
-        try:
-            # Set environment variable to disable output buffering
-            my_env = os.environ.copy()
-            my_env['PYTHONUNBUFFERED'] = '1'
-
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                bufsize=1,  # Line buffered
-                env=my_env,
-                preexec_fn=os.setsid,
-                cwd=os.path.dirname(os.path.abspath(__file__))  # Set working directory to script location
-            )
-            self.debug_info.append(f"Process started with PID: {self.process.pid}")
-            
-            # Start output streaming threads
-            threading.Thread(target=self.stream_output, args=(self.process,), daemon=True).start()
-            
-        except Exception as e:
-            self.debug_info.append(f"Error starting process: {str(e)}")
-            raise
-
-    def stop_training(self):
-        """Gracefully stop training process and clean up resources"""
-        try:
-            if self.process:
-                self.should_stop = True
-                self.debug_info.append("Stopping training process...")
-                
-                # Try graceful termination first
-                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                
-                # Give it some time to terminate gracefully
-                for _ in range(5):
-                    if self.process.poll() is not None:
-                        break
-                    time.sleep(1)
-                    
-                # Force kill if still running
-                if self.process.poll() is None:
-                    self.debug_info.append("Process didn't terminate gracefully, forcing...")
-                    os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
-                
-                # Clean up
-                self.process.stdout.close()
-                self.process.stderr.close()
-                self.process.wait()
-                self.process = None
-                
-                # Clear queues
-                while not self.output_queue.empty():
-                    try:
-                        self.output_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                        
-                self.debug_info.append("Training process stopped and cleaned up")
-        except Exception as e:
-            self.debug_info.append(f"Error during cleanup: {str(e)}")
-        finally:
-            self.process = None
-            self.should_stop = False
-            self.current_epoch = 0
-            self.current_batch = 0
-            self.current_loss = 0.0
 
 def configure_accelerate(num_gpus, output_dir):
     """Configure accelerate using subprocess to simulate user input"""
@@ -353,111 +283,57 @@ def main():
     button_label = "Stop Training" if st.session_state.training_active else "Start Training"
     if col_buttons[1].button(button_label, disabled=not st.session_state.config_saved and not st.session_state.training_active):
         if st.session_state.training_active:
-            try:
-                st.session_state.monitor.stop_training()
-                st.session_state.training_active = False
-                # Clear interface elements
-                if 'ui' in locals():
-                    ui['training_log'].empty()
-                    ui['warning_log'].empty()
-                    ui['error_log'].empty()
-                st.warning("Training stopped by user")
-            except Exception as e:
-                st.error(f"Error stopping training: {str(e)}")
-                if st.session_state.monitor.debug_info:
-                    st.code('\n'.join(st.session_state.monitor.debug_info[-100:]))
+            st.session_state.monitor.stop_training()
+            st.session_state.training_active = False
+            st.warning("Training stopped by user")
         else:
-            # Start training
-            if st.session_state.cmd:
-                try:
-                    with st.spinner("Configuring Accelerate..."):
-                        config_path = configure_accelerate(num_gpus, output_dir)
-                        st.success(f"Accelerate configured for {num_gpus} GPU{'s' if num_gpus > 1 else ''}")
-                    
-                    # Setup training interface
-                    ui = render_training_interface()
-                    
-                    # Add debug output section
-                    debug_output = st.empty()
-                    
-                    # Start training and update state
-                    st.session_state.monitor.start_training(st.session_state.cmd)
-                    st.session_state.monitor.total_epochs = epochs
-                    st.session_state.training_active = True
+            try:
+                # Create training config
+                config = {
+                    "training_mode": training_mode,
+                    "data_dir": data_dir,
+                    "output_dir": output_dir,
+                    "model_path": model_path,
+                    "batch_size": batch_size,
+                    "epochs": epochs,
+                    "learning_rate": learning_rate,
+                    "segment_duration": segment_duration,
+                    "checkpoint_freq": checkpoint_freq,
+                    "gradient_accumulation_steps": grad_accum_steps,
+                    "encoder_layers": encoder_layers,
+                    "encoder_embed_dim": encoder_embed_dim,
+                    "num_gpus": num_gpus
+                }
 
-                    # Initialize log buffers
-                    training_buffer = []
-                    warning_buffer = []
-                    error_buffer = []
-                    
-                    training_started = False
-                    timeout_counter = 0
-                    
-                    # Monitor training progress
-                    while True:
-                        try:
-                            # Show debug info periodically
-                            debug_output.code('\n'.join(st.session_state.monitor.debug_info[-100:]))  # Show last 100 lines
-                            
-                            # Check if process is still running
-                            if st.session_state.monitor.process is None:
-                                break
-                                
-                            if st.session_state.monitor.process.poll() is not None:
-                                # Process has finished
-                                break
-                            
-                            # Get output from queue
-                            try:
-                                stream, line = st.session_state.monitor.output_queue.get(timeout=0.1)
-                                training_started = True  # We got output
-                                timeout_counter = 0  # Reset timeout counter
-                                
-                                # Process output
-                                if stream == 'stdout':
-                                    training_buffer.append(line)
-                                    if len(training_buffer) > 100:
-                                        training_buffer.pop(0)
-                                    ui['training_log'].code('\n'.join(training_buffer))
-                                else:  # stderr
-                                    if 'warning' in line.lower():
-                                        warning_buffer.append(line)
-                                        ui['warning_log'].code('\n'.join(warning_buffer))
-                                    else:
-                                        error_buffer.append(line)
-                                        ui['error_log'].code('\n'.join(error_buffer))
-                                
-                            except queue.Empty:
-                                # Check timeout only if training hasn't started
-                                if not training_started:
-                                    timeout_counter += 1
-                                    if timeout_counter > 5000:  # 500 seconds timeout
-                                        st.error("Training process failed to start producing output")
-                                        break
-                                time.sleep(0.1)
-                                continue
-                                
-                        except Exception as e:
-                            st.error(f"Error monitoring training: {str(e)}")
+                if training_mode == "Supervised":
+                    config.update({
+                        "labeled_dir": labeled_dir,
+                        "supervised_weight": supervised_weight
+                    })
+
+                # Setup UI components
+                ui = render_training_interface()
+                
+                # Start training
+                st.session_state.monitor.start_training(config)
+                st.session_state.training_active = True
+
+                # Monitor output queue
+                while True:
+                    try:
+                        msg_type, message = st.session_state.monitor.output_queue.get(timeout=0.1)
+                        if msg_type == 'info':
+                            ui['training_log'].write(message)
+                        elif msg_type == 'error':
+                            ui['error_log'].write(message)
                             break
-                    
-                    # Only show final status if the process has actually finished
-                    if st.session_state.monitor.process and st.session_state.monitor.process.poll() is not None:
-                        return_code = st.session_state.monitor.process.returncode
-                        if return_code == 0:
-                            st.success("Training completed successfully!")
-                        else:
-                            st.error(f"Training failed with return code {return_code}. Check debug output below:")
-                            st.code('\n'.join(st.session_state.monitor.debug_info[-100:]))
-                    elif training_started:
-                        st.info("Training is running...")
-                        
-                except Exception as e:
-                    st.error(f"Error during training setup: {str(e)}")
-                    if st.session_state.monitor.debug_info:
-                        st.code('\n'.join(st.session_state.monitor.debug_info[-100:]))
-            else:
-                st.error("Please generate training command first")
+                    except queue.Empty:
+                        if not st.session_state.monitor.training_thread.is_alive():
+                            break
+                        continue
+
+            except Exception as e:
+                st.error(f"Error during training: {str(e)}")
 
 if __name__ == "__main__":
     main()

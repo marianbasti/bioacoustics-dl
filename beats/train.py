@@ -291,11 +291,13 @@ def supervised_contrastive_loss(features, labels, temperature=0.1):
             
     return loss / batch_size if batch_size > 0 else 0
 
-def main():
-    args = parse_args()
+def main(config, callback=None):
+    """Modified main function to accept config dict and callback"""
+    # Setup from config
+    accelerator = Accelerator()
     
     # Create output directory
-    output_dir = Path(args.output_dir)
+    output_dir = Path(config['output_dir'])
     output_dir.mkdir(exist_ok=True, parents=True)
     
     # Setup logging
@@ -303,31 +305,30 @@ def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         level=logging.INFO,
         handlers=[
-            logging.FileHandler(Path(args.output_dir) / "training.log"),
+            logging.FileHandler(Path(config['output_dir']) / "training.log"),
             logging.StreamHandler()
         ]
     )
     logger = logging.getLogger(__name__)
     
-    logger.info(f"Starting training with arguments: {vars(args)}")
-    accelerator = Accelerator()
+    logger.info(f"Starting training with arguments: {config}")
     
-    if args.labeled_dir:
+    if config['labeled_dir']:
         num_classes = len(dataset.get_all_labels())
         cfg = BEATsConfig({
-            'encoder_layers': args.encoder_layers,
-            'encoder_embed_dim': args.encoder_embed_dim, 
-            'encoder_ffn_embed_dim': args.encoder_embed_dim * 4,
-            'encoder_attention_heads': args.encoder_embed_dim // 64,
+            'encoder_layers': config['encoder_layers'],
+            'encoder_embed_dim': config['encoder_embed_dim'], 
+            'encoder_ffn_embed_dim': config['encoder_embed_dim'] * 4,
+            'encoder_attention_heads': config['encoder_embed_dim'] // 64,
             'input_patch_size': 16,
             'embed_dim': 512,
             'finetuned_model': True,  # Enable prediction head
             'predictor_class': num_classes  # Set number of classes
         })
-    elif args.model_path:
-        logger.info(f"Loading pre-trained model from {args.model_path}")
+    elif config['model_path']:
+        logger.info(f"Loading pre-trained model from {config['model_path']}")
         # Load pre-trained model
-        checkpoint = torch.load(args.model_path, weights_only=True, map_location='cpu')
+        checkpoint = torch.load(config['model_path'], weights_only=True, map_location='cpu')
         cfg = BEATsConfig(checkpoint['cfg'])
         model = BEATs(cfg)
         model.load_state_dict(checkpoint['model'])
@@ -335,23 +336,23 @@ def main():
         logger.info("Initializing model from scratch")
         # Initialize from scratch
         cfg = BEATsConfig({
-            'encoder_layers': args.encoder_layers,
-            'encoder_embed_dim': args.encoder_embed_dim,
-            'encoder_ffn_embed_dim': args.encoder_embed_dim * 4,
-            'encoder_attention_heads': args.encoder_embed_dim // 64,
+            'encoder_layers': config['encoder_layers'],
+            'encoder_embed_dim': config['encoder_embed_dim'],
+            'encoder_ffn_embed_dim': config['encoder_embed_dim'] * 4,
+            'encoder_attention_heads': config['encoder_embed_dim'] // 64,
             'input_patch_size': 16,  # common default value
             'embed_dim': 512,  # common default value
         })
         model = BEATs(cfg)
     
     # Setup dataset and dataloader
-    logger.info(f"Loading dataset from {args.data_dir}")
+    logger.info(f"Loading dataset from {config['data_dir']}")
     dataset = AudioDataset(
-        root_dir=args.data_dir,
-        positive_dir=args.positive_dir,
-        negative_dir=args.negative_dir,  # Add negative_dir
-        labeled_dir=args.labeled_dir,
-        segment_duration=args.segment_duration,
+        root_dir=config['data_dir'],
+        positive_dir=config['positive_dir'],
+        negative_dir=config['negative_dir'],  # Add negative_dir
+        labeled_dir=config['labeled_dir'],
+        segment_duration=config['segment_duration'],
         overlap=0.01,  # 1% overlap between segments
         max_segments_per_file=6,  # Limit segments per file
         random_segments=False  # Randomly select segments
@@ -359,14 +360,14 @@ def main():
     logger.info(f"Dataset size: {len(dataset)} files")
     dataloader = DataLoader(
         dataset, 
-        batch_size=args.batch_size,
+        batch_size=config['batch_size'],
         shuffle=True,
         num_workers=4,
         pin_memory=True
     )
     
     # Setup optimizer
-    optimizer = AdamW(model.parameters(), lr=args.lr)
+    optimizer = AdamW(model.parameters(), lr=config['lr'])
     
     # Prepare everything with accelerator
     model, optimizer, dataloader = accelerator.prepare(model, optimizer, dataloader)
@@ -374,23 +375,32 @@ def main():
     # Initialize memory bank
     memory_bank = MemoryBank(
         size=4096,  # Store 4096 negative examples
-        feature_dim=args.encoder_embed_dim,  # Match model dimension
+        feature_dim=config['encoder_embed_dim'],  # Match model dimension
         device=accelerator.device
     )
 
     logger.info("Starting training loop")
     # Training loop
-    for epoch in range(args.epochs):
+    for epoch in range(config['epochs']):
+        if callback and callback.should_stop:
+            break
+            
+        if callback and callback.on_epoch_start:
+            callback.on_epoch_start(epoch)
+            
         model.train()
         total_loss = 0
         
         for batch_idx, (audio, _) in enumerate(dataloader):
-            if args.labeled_dir:
+            if callback and callback.should_stop:
+                break
+                
+            if config['labeled_dir']:
                 # Get both normal and labeled batches
                 features, _ = accelerator.unwrap_model(model).extract_features(audio)
                 
                 # Get supervised batch and compute supervised loss
-                labeled_batch = dataset.get_labeled_batch(args.batch_size)
+                labeled_batch = dataset.get_labeled_batch(config['batch_size'])
                 if labeled_batch:
                     lab_audio = torch.stack([x[0] for x in labeled_batch]).to(accelerator.device)
                     lab_labels = [x[2] for x in labeled_batch]
@@ -400,7 +410,7 @@ def main():
                     
                     # Combined self-supervised + supervised loss
                     contrastive_loss = advanced_audio_contrastive_loss(features, memory_bank=memory_bank.get_memory())
-                    loss = contrastive_loss + args.supervised_weight * supervised_loss
+                    loss = contrastive_loss + config['supervised_weight'] * supervised_loss
                 else:
                     # Fallback to just self-supervised if no labeled batch
                     loss = advanced_audio_contrastive_loss(features, memory_bank=memory_bank.get_memory())
@@ -411,8 +421,8 @@ def main():
                 
                 # Get negative examples if available
                 negative_batch = None
-                if args.negative_dir:
-                    negative_batch = dataset.get_negative_batch(args.batch_size)
+                if config['negative_dir']:
+                    negative_batch = dataset.get_negative_batch(config['batch_size'])
                     if negative_batch:
                         neg_audio = torch.stack([x[0] for x in negative_batch]).to(accelerator.device)
                         neg_features, _ = accelerator.unwrap_model(model).extract_features(neg_audio)
@@ -426,7 +436,7 @@ def main():
                 )
 
             # Scale loss by gradient accumulation steps
-            loss = loss / args.gradient_accumulation_steps
+            loss = loss / config['gradient_accumulation_steps']
 
             # Update memory bank with current batch
             memory_bank.update(global_features)
@@ -434,20 +444,26 @@ def main():
             # Backward pass with accelerator
             accelerator.backward(loss)
             
-            if (batch_idx + 1) % args.gradient_accumulation_steps == 0:
+            if (batch_idx + 1) % config['gradient_accumulation_steps'] == 0:
                 optimizer.step()
                 optimizer.zero_grad()
             
-            total_loss += loss.item() * args.gradient_accumulation_steps
+            total_loss += loss.item() * config['gradient_accumulation_steps']
             
             if batch_idx % 10 == 0:
                 logger.info(f"Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.4f}")
+            
+            if callback and callback.on_batch_end:
+                callback.on_batch_end(epoch, batch_idx, loss.item())
         
         avg_loss = total_loss / len(dataloader)
         logger.info(f"Epoch {epoch} completed, Average Loss: {avg_loss:.4f}")
         
+        if callback and callback.on_epoch_end:
+            callback.on_epoch_end(epoch, avg_loss)
+        
         # Save checkpoint on main process only
-        if accelerator.is_main_process and (epoch + 1) % args.checkpoint_freq == 0:
+        if accelerator.is_main_process and (epoch + 1) % config['checkpoint_freq'] == 0:
             checkpoint_path = output_dir / f"checkpoint_epoch_{epoch}.pt"
             logger.info(f"Saving checkpoint to {checkpoint_path}")
             unwrapped_model = accelerator.unwrap_model(model)
@@ -461,6 +477,12 @@ def main():
         
         # Wait for checkpoint to be saved
         accelerator.wait_for_everyone()
+    
+    if callback and callback.on_training_end:
+        callback.on_training_end(avg_loss)
 
 if __name__ == "__main__":
-    main()
+    # Keep CLI entry point
+    args = parse_args()
+    config = vars(args)
+    main(config)
