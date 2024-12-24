@@ -13,3 +13,11 @@ psutil
 plotly
 pandas
 seaborn
+fairseq==0.12.2
+h5py==3.10.0
+omegaconf==2.0.6
+pyarrow==15.0.0
+soundfile==0.12.1
+timm==0.9.12
+torchsummary
+tensorboardX
