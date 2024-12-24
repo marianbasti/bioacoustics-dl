@@ -100,20 +100,10 @@ if [ ! -z "$RESTORE_FILE" ]; then
     RESTORE_ARG="checkpoint.restore_file=$RESTORE_FILE"
 fi
 
-# Run pretraining
-python fairseq_cli/hydra_train.py -m \
-    --config-dir EAT/config \
-    --config-name pretraining_AS2M \
-    common.user_dir=$EAT_DIR \
-    checkpoint.save_dir=$SAVE_DIR \
-    $RESTORE_ARG \
-    distributed_training.distributed_world_size=$WORLD_SIZE \
-    distributed_training.distributed_init_method=tcp://localhost:12345 \
-    distributed_training.ddp_backend=c10d \
-    distributed_training.device_id=\$LOCAL_RANK \
-    common.tpu=false \
-    optimization.max_update=$NUM_UPDATES \
-    optimization.lr=[$LEARNING_RATE] \
-    dataset.batch_size=$BATCH_SIZE \
-    task.data=$DATA_DIR \
-    task.h5_format=false
+# Remove the python command at the end and just export the variables
+export CUDA_VISIBLE_DEVICES=$CUDA_DEVICES
+export WORLD_SIZE=${#GPU_ARRAY[@]}
+export RESTORE_ARG
+if [ ! -z "$RESTORE_FILE" ]; then
+    RESTORE_ARG="checkpoint.restore_file=$RESTORE_FILE"
+fi

@@ -17,7 +17,10 @@ IFS=',' read -ra GPU_ARRAY <<< "$CUDA_DEVICES"
 NUM_GPUS=${#GPU_ARRAY[@]}
 
 # Launch distributed training
-CUDA_VISIBLE_DEVICES=$CUDA_DEVICES torchrun \
+CUDA_VISIBLE_DEVICES=$CUDA_DEVICES python -m torch.distributed.launch \
     --nproc_per_node=$NUM_GPUS \
     --master_port=12345 \
-    $(dirname "$0")/pretrain.sh $ARGS
+    fairseq_cli/hydra_train.py -m \
+    --config-dir EAT/config \
+    --config-name pretraining_AS2M \
+    $ARGS
