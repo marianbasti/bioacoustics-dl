@@ -7,8 +7,12 @@ import random
 
 def get_audio_info(file_path):
     """Get number of frames in audio file"""
-    info = sf.info(file_path)
-    return int(info.frames)
+    try:
+        info = sf.info(file_path)
+        return int(info.frames)
+    except RuntimeError as e:
+        print(f"Error processing {file_path}: {e}", file=sys.stderr)
+        return 0
 
 def create_manifest(data_dir, split_ratio=0.9):
     """Create train.tsv and eval.tsv manifests"""
