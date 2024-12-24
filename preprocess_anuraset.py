@@ -31,11 +31,11 @@ def create_manifest(data_dir, split_ratio=0.9):
         with open(manifest_path, "w") as f:
             # Write header with audio directory path
             print(str(data_dir.absolute()), file=f)
-            # Write audio files
+            # Write audio files with relative paths
             for wav_path in files:
                 frames = get_audio_info(wav_path)
-                abs_path = wav_path.absolute()
-                print(f"{abs_path}\t{frames}", file=f)
+                rel_path = wav_path.relative_to(data_dir)
+                print(f"{rel_path}\t{frames}", file=f)
 
 def main():
     parser = argparse.ArgumentParser()
