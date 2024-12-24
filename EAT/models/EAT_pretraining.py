@@ -119,9 +119,9 @@ class Data2VecMultiConfig(FairseqDataclass):
 
     max_update: int = II("optimization.max_update")
 
-    modalities: D2vModalitiesConfig = D2vModalitiesConfig()
+    modalities: D2vModalitiesConfig = field(default_factory=D2vModalitiesConfig)
 
-    shared_decoder: Optional[D2vDecoderConfig] = None
+    shared_decoder: Optional[D2vDecoderConfig] = field(default=None)
 
     min_target_var: float = field(
         default=0.1, metadata={"help": "stop training if target var falls below this"}
