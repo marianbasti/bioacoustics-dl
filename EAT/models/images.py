@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from functools import partial
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
 from timm.models.layers import to_2tuple
 from fairseq.tasks import FairseqTask
@@ -57,6 +57,7 @@ class D2vImageConfig(D2vModalityConfig):
     enc_dec_transformer: bool = False
     target_length: int = 1024
     max_length: int = 768
+    decoder: Optional[D2vDecoderConfig] = field(default_factory=D2vDecoderConfig)
 
 class ImageEncoder(ModalitySpecificEncoder):
 
