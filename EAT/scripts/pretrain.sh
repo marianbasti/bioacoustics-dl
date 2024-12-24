@@ -98,8 +98,8 @@ fi
 # Run pretraining
 python fairseq_cli/hydra_train.py -m \
     --config-dir EAT/config \
-    --user-dir EAT \
     --config-name pretraining_AS2M \
+    common.user_dir EAT \
     checkpoint.save_dir=$SAVE_DIR \
     $RESTORE_ARG \
     distributed_training.distributed_world_size=$WORLD_SIZE \
