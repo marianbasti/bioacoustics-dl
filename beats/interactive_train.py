@@ -57,28 +57,31 @@ class TrainingMonitor:
         
     def stream_output(self, process):
         """Stream process output to queue"""
-        try:
-            for line in iter(process.stdout.readline, b''):
-                if self.should_stop:
-                    break
-                line = line.decode('utf-8', errors='replace').rstrip()
+        while True:
+            if self.should_stop:
+                break
+
+            # Read from stdout
+            stdout_line = process.stdout.readline()
+            if stdout_line:
+                line = stdout_line.strip()
                 self.parse_training_line(line)
                 self.output_queue.put(('stdout', line + '\n'))
                 self.debug_info.append(f"STDOUT: {line}")
-            process.stdout.close()
-        except Exception as e:
-            self.debug_info.append(f"Error in stdout stream: {str(e)}")
-            
-        try:
-            for line in iter(process.stderr.readline, b''):
-                if self.should_stop:
-                    break
-                line = line.decode('utf-8', errors='replace').rstrip()
+
+            # Read from stderr
+            stderr_line = process.stderr.readline()
+            if stderr_line:
+                line = stderr_line.strip()
                 self.output_queue.put(('stderr', line + '\n'))
                 self.debug_info.append(f"STDERR: {line}")
-            process.stderr.close()
-        except Exception as e:
-            self.debug_info.append(f"Error in stderr stream: {str(e)}")
+
+            # Check if process is still running
+            if process.poll() is not None and not stdout_line and not stderr_line:
+                break
+
+        process.stdout.close()
+        process.stderr.close()
 
     def start_training(self, cmd):
         """Start training process with output monitoring"""
@@ -86,12 +89,17 @@ class TrainingMonitor:
         self.debug_info.append(f"Starting training with command: {' '.join(cmd)}")
         
         try:
+            # Set environment variable to disable output buffering
+            my_env = os.environ.copy()
+            my_env['PYTHONUNBUFFERED'] = '1'
+
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                bufsize=1,  # Line buffering
-                text=False,  # Get bytes instead of text
+                universal_newlines=True,
+                bufsize=1,  # Line buffered
+                env=my_env,
                 preexec_fn=os.setsid,
                 cwd=os.path.dirname(os.path.abspath(__file__))  # Set working directory to script location
             )
@@ -411,16 +419,12 @@ def main():
                                     if len(training_buffer) > 100:
                                         training_buffer.pop(0)
                                     ui['training_log'].code('\n'.join(training_buffer))
-                                    ui['training_log'].empty()  # Force refresh
-                                    ui['training_log'].code('\n'.join(training_buffer))
                                 else:  # stderr
                                     if 'warning' in line.lower():
                                         warning_buffer.append(line)
-                                        ui['warning_log'].empty()  # Force refresh
                                         ui['warning_log'].code('\n'.join(warning_buffer))
                                     else:
                                         error_buffer.append(line)
-                                        ui['error_log'].empty()  # Force refresh
                                         ui['error_log'].code('\n'.join(error_buffer))
                                 
                             except queue.Empty:
