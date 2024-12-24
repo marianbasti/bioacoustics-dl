@@ -108,6 +108,4 @@ python fairseq_cli/hydra_train.py -m \
     optimization.lr=[$LEARNING_RATE] \
     dataset.batch_size=$BATCH_SIZE \
     task.data=$DATA_DIR \
-    task.h5_format=true \
-    task.target_length=$TARGET_LENGTH \
-    +model.mask_ratio=$MASK_RATIO
+    task.h5_format=true
