@@ -4,7 +4,8 @@
 CUDA_DEVICES="0"
 BATCH_SIZE=12
 SAVE_DIR=""
-DATA_PATH=""
+DATA_DIR="$(pwd)/data/unlabeled"
+WORLD_SIZE=1
 RESTORE_FILE=""
 TARGET_LENGTH=1024
 MASK_RATIO=0.75
@@ -12,8 +13,12 @@ NUM_UPDATES=400000
 LEARNING_RATE=1.5e-4
 UPDATE_FREQ=1
 PROJECT_DIR="$(pwd)"
-DATA_DIR="${PROJECT_DIR}/data/unlabeled"
 EAT_DIR="${PROJECT_DIR}/EAT"
+NNODES=1
+NODE_RANK=0
+NPROC_PER_NODE=4
+MASTER_ADDR="localhost"
+MASTER_PORT=29500
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -30,8 +35,8 @@ while [[ $# -gt 0 ]]; do
             SAVE_DIR="$2"
             shift 2
             ;;
-        --data_path)
-            DATA_PATH="$2"
+        --data_dir)
+            DATA_DIR="$2"
             shift 2
             ;;
         --restore_file)
@@ -58,8 +63,24 @@ while [[ $# -gt 0 ]]; do
             UPDATE_FREQ="$2"
             shift 2
             ;;
-        --data_dir)
-            DATA_DIR="$2"
+        --nnodes)
+            NNODES="$2"
+            shift 2
+            ;;
+        --node_rank)
+            NODE_RANK="$2"
+            shift 2
+            ;;
+        --nproc_per_node)
+            NPROC_PER_NODE="$2"
+            shift 2
+            ;;
+        --master_addr)
+            MASTER_ADDR="$2"
+            shift 2
+            ;;
+        --master_port)
+            MASTER_PORT="$2"
             shift 2
             ;;
         *)
@@ -82,16 +103,11 @@ if [ ! -d "$DATA_DIR" ]; then
     exit 1
 fi
 
-# Calculate number of GPUs
-IFS=',' read -ra GPU_ARRAY <<< "$CUDA_DEVICES"
-NUM_GPUS=${#GPU_ARRAY[@]}
-
-# Adjust batch size and learning rate for distributed training
-EFFECTIVE_BATCH_SIZE=$((BATCH_SIZE * NUM_GPUS))
-EFFECTIVE_LR=$(echo "$LEARNING_RATE * $NUM_GPUS" | bc -l)
-
 # Set CUDA devices
 export CUDA_VISIBLE_DEVICES=$CUDA_DEVICES
+
+# Calculate total world size
+WORLD_SIZE=$((NNODES * NPROC_PER_NODE))
 
 # Construct restore file argument if provided
 RESTORE_ARG=""
@@ -101,21 +117,21 @@ fi
 
 # Run distributed training
 python -m torch.distributed.launch \
-    --nproc_per_node=$NUM_GPUS \
-    --nnodes=1 \
-    --node_rank=0 \
-    --master_addr=localhost \
-    --master_port=29500 \
-    fairseq_cli/hydra_train.py -m \
+    --use_env \
+    --nproc_per_node=$NPROC_PER_NODE \
+    --nnodes=$NNODES \
+    --node_rank=$NODE_RANK \
+    --master_addr=$MASTER_ADDR \
+    --master_port=$MASTER_PORT \
+    fairseq_cli/hydra_train.py \
     --config-dir EAT/config \
     --config-name pretraining_AS2M \
     common.user_dir=$EAT_DIR \
     checkpoint.save_dir=$SAVE_DIR \
     $RESTORE_ARG \
-    distributed_training.distributed_world_size=$NUM_GPUS \
-    distributed_training.distributed_init_method=tcp://localhost:29500 \
+    distributed_training.distributed_world_size=$WORLD_SIZE \
     optimization.max_update=$NUM_UPDATES \
-    optimization.lr=[$EFFECTIVE_LR] \
+    optimization.lr=[$LEARNING_RATE] \
     dataset.batch_size=$BATCH_SIZE \
     task.data=$DATA_DIR \
     task.h5_format=false
