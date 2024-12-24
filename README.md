@@ -205,6 +205,14 @@ Si utilizas este código en tu investigación, por favor cita:
   journal={arXiv preprint arXiv:2401.03497},
   year={2024}
 }
+``` bibtex
+@inproceedings{ott2019fairseq,
+  title = {fairseq: A Fast, Extensible Toolkit for Sequence Modeling},
+  author = {Myle Ott and Sergey Edunov and Alexei Baevski and Angela Fan and Sam Gross and Nathan Ng and David Grangier and Michael Auli},
+  booktitle = {Proceedings of NAACL-HLT 2019: Demonstrations},
+  year = {2019},
+}
+```
 ```bibtex
 @misc{bioacoustics,
   author = {Marian Basti},
