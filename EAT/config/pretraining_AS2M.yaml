@@ -7,7 +7,7 @@ common:
   tensorboard_logdir: tb
   min_loss_scale: 1e-6
   fp16_no_flatten_grads: true
-  user_dir: ${env:PWD}
+  user_dir: ${oc.env:PWD}
   seed: 1
 
 checkpoint:

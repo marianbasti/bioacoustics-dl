@@ -98,16 +98,15 @@ fi
 # Run pretraining
 python fairseq_cli/hydra_train.py -m \
     --config-dir EAT/config \
+    --user-dir EAT \
     --config-name pretraining_AS2M \
-    common.user_dir=EAT \
     checkpoint.save_dir=$SAVE_DIR \
     $RESTORE_ARG \
     distributed_training.distributed_world_size=$WORLD_SIZE \
     optimization.max_update=$NUM_UPDATES \
-    optimization.lr[0]=$LEARNING_RATE \
-    optimization.update_freq[0]=$UPDATE_FREQ \
+    optimization.lr=[$LEARNING_RATE] \
     dataset.batch_size=$BATCH_SIZE \
     task.data=$DATA_DIR \
     task.h5_format=true \
     task.target_length=$TARGET_LENGTH \
-    model.mask_ratio=$MASK_RATIO
+    +model.mask_ratio=$MASK_RATIO

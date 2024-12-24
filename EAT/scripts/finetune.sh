@@ -109,7 +109,6 @@ fi
 python fairseq_cli/hydra_train.py -m \
     --config-dir EAT/config \
     --config-name finetuning \
-    common.user_dir=EAT \
     checkpoint.save_dir=$SAVE_DIR \
     checkpoint.best_checkpoint_metric=mAP \
     $RESTORE_ARG \
@@ -123,5 +122,5 @@ python fairseq_cli/hydra_train.py -m \
     model.model_path=$MODEL_PATH \
     model.num_classes=$NUM_CLASSES \
     model.mixup=$MIXUP \
-    model.mask_ratio=$MASK_RATIO \
+    +model.mask_ratio=$MASK_RATIO \
     model.prediction_mode=PredictionMode.$PREDICTION_MODE
