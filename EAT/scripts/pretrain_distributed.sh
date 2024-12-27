@@ -116,7 +116,7 @@ if [ ! -z "$RESTORE_FILE" ]; then
 fi
 
 # Run distributed training
-python -m torchrun \
+torchrun \
     --use_env \
     --nproc_per_node $NPROC_PER_NODE \
     --nnodes $NNODES \
