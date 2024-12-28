@@ -74,10 +74,10 @@ def main():
         
         with open(os.path.join(args.output_dir, "train.lbl"), "w") as f:
             for filename, labels in train_data:
-                f.write(f"{filename},{labels}\n")
+                f.write(f"{filename} {labels}\n")  # Changed comma to space
         with open(os.path.join(args.output_dir, "eval.lbl"), "w") as f:
             for filename, labels in eval_data:
-                f.write(f"{filename},{labels}\n")
+                f.write(f"{filename} {labels}\n")  # Changed comma to space
     else:
         for filename, labels in extracted_data:
             print(f"{filename},{labels}")
