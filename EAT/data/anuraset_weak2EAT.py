@@ -67,16 +67,16 @@ def main():
         write_label_descriptors(unique_labels, 
                               os.path.join(args.output_dir, "label_descriptors.csv"))
         
-        # Original code for train/val split
+        # Original code for train/eval split
         cutoff = int(0.8 * len(extracted_data))
         train_data = extracted_data[:cutoff]
-        val_data = extracted_data[cutoff:]
+        eval_data = extracted_data[cutoff:]
         
         with open(os.path.join(args.output_dir, "train.lbl"), "w") as f:
             for filename, labels in train_data:
                 f.write(f"{filename},{labels}\n")
-        with open(os.path.join(args.output_dir, "val.lbl"), "w") as f:
-            for filename, labels in val_data:
+        with open(os.path.join(args.output_dir, "eval.lbl"), "w") as f:
+            for filename, labels in eval_data:
                 f.write(f"{filename},{labels}\n")
     else:
         for filename, labels in extracted_data:
