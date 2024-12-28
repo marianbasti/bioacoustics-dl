@@ -1,6 +1,7 @@
 import argparse
 import os
 from pathlib import Path
+import logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -10,6 +11,7 @@ def parse_args():
     return parser.parse_args()
 
 def process_label_file(file_path):
+    logging.info(f"Processing label file: {file_path}")
     labels = set()
     with open(file_path, 'r') as f:
         for line in f:
@@ -19,6 +21,7 @@ def process_label_file(file_path):
     return labels
 
 def convert_labels(data_dir, labels_dir, output_file):
+    logging.info(f"Converting labels from {labels_dir} with data in {data_dir}, output to {output_file}")
     data_dir = Path(data_dir)
     labels_dir = Path(labels_dir)
     results = []
@@ -32,6 +35,7 @@ def convert_labels(data_dir, labels_dir, output_file):
         # Skip if audio doesn't exist
         if not (audio_path.with_suffix('.wav').exists() or 
                 audio_path.with_suffix('.mp3').exists()):
+            logging.warning(f"No audio file found for {txt_path}")
             continue
 
         # Get relative path from data_dir
@@ -43,12 +47,14 @@ def convert_labels(data_dir, labels_dir, output_file):
             'labels': ','.join(sorted(labels))
         })
 
+    logging.info(f"Writing output file to {output_file}")
     # Write output file
     with open(output_file, 'w') as f:
         for entry in results:
             f.write(f"{entry['path']}\t{entry['labels']}\n")
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     args = parse_args()
     convert_labels(args.data_dir, args.labels_dir, args.output_file)
 
