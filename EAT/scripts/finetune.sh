@@ -15,6 +15,7 @@ RESTORE_FILE=""
 PROJECT_DIR="$(pwd)"
 DATA_DIR="${PROJECT_DIR}/data/labeled"
 LABELS_FILE="${DATA_DIR}/labels.csv"
+EAT_DIR="${PROJECT_DIR}/EAT"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -111,6 +112,7 @@ python fairseq_cli/hydra_train.py -m \
     --config-name finetuning \
     checkpoint.save_dir=$SAVE_DIR \
     checkpoint.best_checkpoint_metric=mAP \
+    common.user_dir=$EAT_DIR \
     $RESTORE_ARG \
     dataset.batch_size=$BATCH_SIZE \
     task.data=$DATA_DIR \
@@ -121,5 +123,5 @@ python fairseq_cli/hydra_train.py -m \
     model.model_path=$MODEL_PATH \
     model.num_classes=$NUM_CLASSES \
     model.mixup=$MIXUP \
-    +model.mask_ratio=$MASK_RATIO \
+    ++model.mask_ratio=$MASK_RATIO \
     model.prediction_mode=PredictionMode.$PREDICTION_MODE
