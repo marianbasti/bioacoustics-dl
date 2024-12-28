@@ -51,15 +51,45 @@ def write_label_descriptors(labels, output_path):
         for idx, label in enumerate(labels):
             f.write(f"{label},{idx}\n")
 
+def write_tsv_files(extracted_data, audio_dir, output_dir):
+    import soundfile as sf
+    
+    with open(os.path.join(output_dir, "train.tsv"), "w") as f:
+        # Write root directory as first line
+        f.write(f"{audio_dir}\n")
+        
+        cutoff = int(0.8 * len(extracted_data))
+        train_data = extracted_data[:cutoff]
+        
+        # Write audio file paths and their lengths
+        for filename, labels in train_data:
+            audio_path = os.path.join(audio_dir, filename)
+            info = sf.info(audio_path)
+            num_samples = int(info.frames)
+            rel_path = os.path.relpath(audio_path, audio_dir)
+            f.write(f"{rel_path} {num_samples}\n")
+
+    # Same for eval.tsv
+    with open(os.path.join(output_dir, "eval.tsv"), "w") as f:
+        f.write(f"{audio_dir}\n")
+        eval_data = extracted_data[cutoff:]
+        for filename, labels in eval_data:
+            audio_path = os.path.join(audio_dir, filename)
+            info = sf.info(audio_path)
+            num_samples = int(info.frames)
+            rel_path = os.path.relpath(audio_path, audio_dir)
+            f.write(f"{rel_path} {num_samples}\n")
+
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
     parser.add_argument("--input_file", required=True, help="Path to the input CSV file.")
     parser.add_argument("--output_dir", help="Directory to store output files.")
+    parser.add_argument("--audio_dir", help="Directory containing the audio files.")
     args = parser.parse_args()
     
     extracted_data = extract_labels_from_file(args.input_file)
     
-    if args.output_dir:
+    if args.output_dir and args.audio_dir:
         os.makedirs(args.output_dir, exist_ok=True)
         
         # Generate label_descriptors.csv
@@ -67,20 +97,8 @@ def main():
         write_label_descriptors(unique_labels, 
                               os.path.join(args.output_dir, "label_descriptors.csv"))
         
-        # Original code for train/eval split
-        cutoff = int(0.8 * len(extracted_data))
-        train_data = extracted_data[:cutoff]
-        eval_data = extracted_data[cutoff:]
-        
-        with open(os.path.join(args.output_dir, "train.tsv"), "w") as f:
-            for filename, labels in train_data:
-                f.write(f"{filename} {labels}\n")  # Changed comma to space
-        with open(os.path.join(args.output_dir, "eval.tsv"), "w") as f:
-            for filename, labels in eval_data:
-                f.write(f"{filename} {labels}\n")  # Changed comma to space
-    else:
-        for filename, labels in extracted_data:
-            print(f"{filename},{labels}")
+        # Write TSV files with audio durations
+        write_tsv_files(extracted_data, args.audio_dir, args.output_dir)
 
 if __name__ == "__main__":
     main()
