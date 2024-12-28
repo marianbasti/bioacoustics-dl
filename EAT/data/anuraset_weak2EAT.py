@@ -40,10 +40,20 @@ def extract_labels_from_file(input_file):
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
     parser.add_argument("--input_file", required=True, help="Path to the input CSV file.")
+    parser.add_argument("--output_file", help="Path to the output CSV file.")
     args = parser.parse_args()
     extracted_data = extract_labels_from_file(args.input_file)
-    for filename, labels in extracted_data:
-        print(f"{filename},{labels}")
+    if args.output_file:
+        if not args.output_file.endswith(".csv"):
+            args.output_file += ".csv"
+        with open(args.output_file, "w", newline="") as outfile:
+            writer = csv.writer(outfile)
+            writer.writerow(["filename", "labels"])
+            for filename, labels in extracted_data:
+                writer.writerow([filename, labels])
+    else:
+        for filename, labels in extracted_data:
+            print(f"{filename},{labels}")
 
 if __name__ == "__main__":
     main()
