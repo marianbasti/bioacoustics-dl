@@ -29,8 +29,9 @@ def extract_labels_from_file(input_file):
             
             # Iterate over the species columns (starting from index 2)
             for i, value in enumerate(row[2:], start=0):  # Start at index 0 for species columns
-                if value == '2':  # Presence (assuming '2' means present in the dataset)
-                    labels.append(species_columns[i])
+                # Store 0..3: if blank, treat as '0' = absent
+                level = value if value in ['1','2','3'] else '0'
+                labels.append(f"{species_columns[i]}={level}")
             
             # Join the labels into a single string, separated by commas
             labels_str = ','.join(labels)
