@@ -20,11 +20,17 @@ def process_label_file(file_path):
                 labels.update([l.strip() for l in label.split(',')])
     return labels
 
+def write_label_descriptors(labels, output_dir):
+    with open(Path(output_dir) / "label_descriptors.csv", "w") as f:
+        for idx, label in enumerate(sorted(labels)):
+            f.write(f"{idx},{label}\n")
+
 def convert_labels(data_dir, labels_dir, output_file):
     logging.info(f"Converting labels from {labels_dir} with data in {data_dir}, output to {output_file}")
     data_dir = Path(data_dir)
     labels_dir = Path(labels_dir)
     results = []
+    all_labels = set()
 
     # Find all txt files
     txt_files = list(labels_dir.rglob('*.txt'))
@@ -43,11 +49,15 @@ def convert_labels(data_dir, labels_dir, output_file):
         # Get relative path from data_dir
         rel_audio_path = audio_path.relative_to(data_dir)
         labels = process_label_file(txt_path)
+        all_labels.update(labels)
         
         results.append({
             'path': str(rel_audio_path),
             'labels': ','.join(sorted(labels))
         })
+
+    output_dir = str(Path(output_file).parent)
+    write_label_descriptors(all_labels, output_dir)
 
     logging.info(f"Writing output file to {output_file}")
     # Write output file
