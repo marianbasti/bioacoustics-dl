@@ -1,5 +1,6 @@
 import csv
 import argparse
+import os
 
 def extract_labels_from_file(input_file):
     """
@@ -40,15 +41,20 @@ def extract_labels_from_file(input_file):
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
     parser.add_argument("--input_file", required=True, help="Path to the input CSV file.")
-    parser.add_argument("--output_file", help="Path to the output file.")
+    parser.add_argument("--output_dir", help="Directory to store output files.")
     args = parser.parse_args()
     extracted_data = extract_labels_from_file(args.input_file)
-    if args.output_file:
-        with open(args.output_file, "w", newline="") as outfile:
-            writer = csv.writer(outfile)
-            writer.writerow(["filename", "labels"])
-            for filename, labels in extracted_data:
-                writer.writerow([filename, labels])
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+        cutoff = int(0.8 * len(extracted_data))
+        train_data = extracted_data[:cutoff]
+        val_data = extracted_data[cutoff:]
+        with open(os.path.join(args.output_dir, "train.lbl"), "w") as f:
+            for filename, labels in train_data:
+                f.write(f"{filename},{labels}\n")
+        with open(os.path.join(args.output_dir, "val.lbl"), "w") as f:
+            for filename, labels in val_data:
+                f.write(f"{filename},{labels}\n")
     else:
         for filename, labels in extracted_data:
             print(f"{filename},{labels}")
