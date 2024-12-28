@@ -27,7 +27,9 @@ def convert_labels(data_dir, labels_dir, output_file):
     results = []
 
     # Find all txt files
-    for txt_path in labels_dir.rglob('*.txt'):
+    txt_files = list(labels_dir.rglob('*.txt'))
+    logging.info(f"Found {len(txt_files)} label files.")
+    for txt_path in txt_files:
         # Get corresponding audio path
         rel_path = txt_path.relative_to(labels_dir)
         audio_path = data_dir / rel_path.parent / rel_path.stem
