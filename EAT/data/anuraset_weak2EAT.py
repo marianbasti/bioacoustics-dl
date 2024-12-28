@@ -65,6 +65,7 @@ def collect_audio_files(audio_dir):
                     num_samples = int(info.frames)
                 except Exception:
                     # skip file if there's an error reading it
+                    print(f"Error reading {full_path}")
                     continue
                 rel_path = os.path.relpath(full_path, audio_dir)
                 audio_files.append((rel_path, num_samples))
@@ -74,8 +75,8 @@ def collect_audio_files(audio_dir):
 def write_tsv_files(extracted_data, audio_dir, output_dir):
     """Write train.tsv and eval.tsv with recursive audio paths."""
     
-    # Collect all audio files recursively
-    audio_files = {os.path.basename(path): (path, samples) 
+    # Collect all audio files recursively - store full relative paths
+    audio_files = {path: (path, samples) 
                   for path, samples in collect_audio_files(audio_dir)}
     
     # Split into train/eval
@@ -87,17 +88,24 @@ def write_tsv_files(extracted_data, audio_dir, output_dir):
     with open(os.path.join(output_dir, "train.tsv"), "w") as f:
         f.write(f"{audio_dir}\n")
         for filename, _ in train_data:
-            if filename in audio_files:
-                rel_path, num_samples = audio_files[filename]
-                f.write(f"{rel_path} {num_samples}\n")
+            # Match against full relative path
+            rel_path = os.path.join(os.path.dirname(filename), os.path.basename(filename))
+            if rel_path in audio_files:
+                path, num_samples = audio_files[rel_path]
+                f.write(f"{path} {num_samples}\n")
+            else:
+                print(f"Warning: Could not find {rel_path}")
     
     # Write eval.tsv  
     with open(os.path.join(output_dir, "eval.tsv"), "w") as f:
         f.write(f"{audio_dir}\n")
         for filename, _ in eval_data:
-            if filename in audio_files:
-                rel_path, num_samples = audio_files[filename]
-                f.write(f"{rel_path} {num_samples}\n")
+            rel_path = os.path.join(os.path.dirname(filename), os.path.basename(filename))
+            if rel_path in audio_files:
+                path, num_samples = audio_files[rel_path]
+                f.write(f"{path} {num_samples}\n")
+            else:
+                print(f"Warning: Could not find {rel_path}")
 
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
