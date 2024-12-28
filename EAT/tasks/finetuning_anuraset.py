@@ -38,7 +38,7 @@ class MaeImageClassificationConfig(MaeImagePretrainingConfig):
     labels: str = "lbl"
 
 
-@register_task("mae_image_classification", dataclass=MaeImageClassificationConfig)
+@register_task("anuraset_classification", dataclass=MaeImageClassificationConfig)
 class MaeImageClassificationTask(MaeImagePretrainingTask):
     """ """
 

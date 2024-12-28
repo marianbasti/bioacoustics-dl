@@ -109,7 +109,7 @@ fi
 # Run training
 python fairseq_cli/hydra_train.py -m \
     --config-dir EAT/config \
-    --config-name finetuning \
+    --config-name finetuning_anuraset \
     checkpoint.save_dir=$SAVE_DIR \
     checkpoint.best_checkpoint_metric=mAP \
     common.user_dir=$EAT_DIR \
