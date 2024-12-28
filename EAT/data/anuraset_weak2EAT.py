@@ -60,8 +60,12 @@ def collect_audio_files(audio_dir):
         for file in files:
             if file.endswith(('.wav', '.WAV')):
                 full_path = os.path.join(root, file)
-                info = sf.info(full_path)
-                num_samples = int(info.frames)
+                try:
+                    info = sf.info(full_path)
+                    num_samples = int(info.frames)
+                except Exception:
+                    # skip file if there's an error reading it
+                    continue
                 rel_path = os.path.relpath(full_path, audio_dir)
                 audio_files.append((rel_path, num_samples))
     
