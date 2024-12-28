@@ -49,7 +49,7 @@ def get_unique_labels(extracted_data):
 def write_label_descriptors(labels, output_path):
     with open(output_path, "w") as f:
         for idx, label in enumerate(labels):
-            f.write(f"{idx},{label}\n")
+            f.write(f"{label},{idx}\n")
 
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
@@ -72,10 +72,10 @@ def main():
         train_data = extracted_data[:cutoff]
         eval_data = extracted_data[cutoff:]
         
-        with open(os.path.join(args.output_dir, "train.lbl"), "w") as f:
+        with open(os.path.join(args.output_dir, "train.tsv"), "w") as f:
             for filename, labels in train_data:
                 f.write(f"{filename} {labels}\n")  # Changed comma to space
-        with open(os.path.join(args.output_dir, "eval.lbl"), "w") as f:
+        with open(os.path.join(args.output_dir, "eval.tsv"), "w") as f:
             for filename, labels in eval_data:
                 f.write(f"{filename} {labels}\n")  # Changed comma to space
     else:
