@@ -114,7 +114,6 @@ python fairseq_cli/hydra_train.py -m \
     $RESTORE_ARG \
     dataset.batch_size=$BATCH_SIZE \
     task.data=$DATA_DIR \
-    task.labels_file=$LABELS_FILE \
     task.h5_format=true \
     task.AS2M_finetune=true \
     task.target_length=$TARGET_LENGTH \
