@@ -51,34 +51,49 @@ def write_label_descriptors(labels, output_path):
         for idx, label in enumerate(labels):
             f.write(f"{label},{idx}\n")
 
+def collect_audio_files(audio_dir):
+    """Recursively collect all audio files and their metadata."""
+    audio_files = []
+    
+    for root, _, files in os.walk(audio_dir):
+        for file in files:
+            if file.endswith(('.wav', '.WAV')):
+                full_path = os.path.join(root, file)
+                info = sf.info(full_path)
+                num_samples = int(info.frames)
+                rel_path = os.path.relpath(full_path, audio_dir)
+                audio_files.append((rel_path, num_samples))
+    
+    return audio_files
+
 def write_tsv_files(extracted_data, audio_dir, output_dir):
+    """Write train.tsv and eval.tsv with recursive audio paths."""
     import soundfile as sf
     
+    # Collect all audio files recursively
+    audio_files = {os.path.basename(path): (path, samples) 
+                  for path, samples in collect_audio_files(audio_dir)}
+    
+    # Split into train/eval
+    cutoff = int(0.8 * len(extracted_data))
+    train_data = extracted_data[:cutoff]
+    eval_data = extracted_data[cutoff:]
+    
+    # Write train.tsv
     with open(os.path.join(output_dir, "train.tsv"), "w") as f:
-        # Write root directory as first line
         f.write(f"{audio_dir}\n")
-        
-        cutoff = int(0.8 * len(extracted_data))
-        train_data = extracted_data[:cutoff]
-        
-        # Write audio file paths and their lengths
-        for filename, labels in train_data:
-            audio_path = os.path.join(audio_dir, filename)
-            info = sf.info(audio_path)
-            num_samples = int(info.frames)
-            rel_path = os.path.relpath(audio_path, audio_dir)
-            f.write(f"{rel_path} {num_samples}\n")
-
-    # Same for eval.tsv
+        for filename, _ in train_data:
+            if filename in audio_files:
+                rel_path, num_samples = audio_files[filename]
+                f.write(f"{rel_path} {num_samples}\n")
+    
+    # Write eval.tsv  
     with open(os.path.join(output_dir, "eval.tsv"), "w") as f:
         f.write(f"{audio_dir}\n")
-        eval_data = extracted_data[cutoff:]
-        for filename, labels in eval_data:
-            audio_path = os.path.join(audio_dir, filename)
-            info = sf.info(audio_path)
-            num_samples = int(info.frames)
-            rel_path = os.path.relpath(audio_path, audio_dir)
-            f.write(f"{rel_path} {num_samples}\n")
+        for filename, _ in eval_data:
+            if filename in audio_files:
+                rel_path, num_samples = audio_files[filename]
+                f.write(f"{rel_path} {num_samples}\n")
 
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
