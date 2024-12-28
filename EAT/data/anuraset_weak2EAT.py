@@ -53,6 +53,7 @@ def write_label_descriptors(labels, output_path):
 
 def collect_audio_files(audio_dir):
     """Recursively collect all audio files and their metadata."""
+    import soundfile as sf
     audio_files = []
     
     for root, _, files in os.walk(audio_dir):
@@ -68,7 +69,6 @@ def collect_audio_files(audio_dir):
 
 def write_tsv_files(extracted_data, audio_dir, output_dir):
     """Write train.tsv and eval.tsv with recursive audio paths."""
-    import soundfile as sf
     
     # Collect all audio files recursively
     audio_files = {os.path.basename(path): (path, samples) 
