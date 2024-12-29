@@ -88,20 +88,45 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         label_path = os.path.join(data_path, f"{split}.{task_cfg.labels}")
         skipped_indices = getattr(self.datasets[split], "skipped_indices", set())
         
+        # First collect all filenames from the dataset
+        dataset_files = set()
+        for i in range(len(self.datasets[split])):
+            if i not in skipped_indices:
+                filename = self.datasets[split].get_filename(i)
+                if filename:
+                    dataset_files.add(os.path.splitext(os.path.basename(filename))[0])
+        
+        logger.info(f"Found {len(dataset_files)} files in dataset for split {split}")
+        
+        # Read labels and match with dataset files
         labels = []
+        label_files = set()
         with open(label_path, "r") as f:
-            for i, line in enumerate(f):
-                if i not in skipped_indices:
-                    label_vector = [0] * len(self.labels)  # Initialize with zeros
-                    if len(line.rstrip().split('\t')) > 1:
-                        label_entries = line.rstrip().split('\t')[1].split()
-                        for entry in label_entries:
-                            species, level = entry.split('=')
-                            if species in self.labels:
-                                label_vector[self.labels[species]] = int(level)
-                    labels.append(label_vector)
+            for line in f:
+                if line.strip():
+                    parts = line.rstrip().split('\t')
+                    filename = parts[0]
+                    label_files.add(filename)
+                    
+                    if filename in dataset_files:
+                        label_vector = [0] * len(self.labels)
+                        if len(parts) > 1:
+                            label_entries = parts[1].split()
+                            for entry in label_entries:
+                                species, level = entry.split('=')
+                                if species in self.labels:
+                                    label_vector[self.labels[species]] = int(level)
+                        labels.append(label_vector)
+        
+        logger.info(f"Found {len(labels)} labels for split {split}")
+        logger.info(f"Dataset size: {len(self.datasets[split])}")
+        logger.info(f"Files in labels but not in dataset: {len(label_files - dataset_files)}")
+        logger.info(f"Files in dataset but not in labels: {len(dataset_files - label_files)}")
 
-        assert len(labels) == len(self.datasets[split])
+        assert len(labels) == len(self.datasets[split]), (
+            f"labels length ({len(labels)}) and dataset length "
+            f"({len(self.datasets[split])}) do not match for split {split}"
+        )
 
         self.datasets[split] = AddClassTargetDataset(
             self.datasets[split],
