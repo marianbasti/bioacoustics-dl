@@ -24,7 +24,7 @@ def extract_labels_from_file(input_file):
         species_columns = headers[2:]
         
         for row in reader:
-            filename = row[1]  # The second element is the filename
+            filename = f"{row[0]}/{row[1]}.wav"
             labels = []
             
             # Iterate over the species columns (starting from index 2)
