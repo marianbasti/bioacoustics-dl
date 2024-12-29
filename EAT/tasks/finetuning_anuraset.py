@@ -97,7 +97,7 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
                     lbl_items = line.rstrip().split()
                     # Each x is "species=LEVEL", parse LEVEL as integer for classification
                     numeric_levels = []
-                    for x in lbl_items[1].split(","):
+                    for x in lbl_items[1].split("\t"):
                         species, level = x.split("=")
                         numeric_levels.append(int(level))
                     labels.append(numeric_levels)
