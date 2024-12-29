@@ -65,9 +65,11 @@ def get_unique_labels(extracted_data):
     return sorted(list(unique_labels))
 
 def write_label_descriptors(labels, output_path):
+    """Write unique species names (without levels) to label descriptors file"""
+    unique_species = sorted(list({label.split('=')[0] for label in labels}))
     with open(output_path, "w") as f:
-        for idx, label in enumerate(labels):
-            f.write(f"{label},{idx}\n")
+        for idx, species in enumerate(unique_species):
+            f.write(f"{idx},{species}\n")
 
 def collect_audio_files(audio_dir):
     logging.info(f"Collecting audio files from {audio_dir}")
@@ -94,18 +96,20 @@ def collect_audio_files(audio_dir):
 
 def write_label_files(extracted_data, output_dir):
     logging.info("Writing label files")
-    """Write train.lbl and eval.lbl files preserving species level information."""
     def write_set(data, output_file):
         with open(os.path.join(output_dir, output_file), "w") as f:
             for filename, labels in data:
                 base_filename = os.path.splitext(os.path.basename(filename))[0]
-                # Keep the full species=level format
-                level_labels = []
+                # Convert to species-level format
+                level_dict = {}
                 for label in labels.split(','):
                     species, level = label.split('=')
-                    if level != '0':  # Only include present species (levels 1-3)
-                        level_labels.append(f"{species}={level}")
-                if level_labels:  # Only write if there are present labels
+                    level_dict[species] = level
+                
+                # Write as species=level pairs
+                level_labels = [f"{species}={level_dict.get(species, '0')}" 
+                              for species in sorted(set(s.split('=')[0] for s in labels.split(',')))]
+                if any(l.endswith(('1','2','3')) for l in level_labels):
                     f.write(f"{base_filename.replace('.wav','')}\t{' '.join(level_labels)}\n")
 
     # Split data

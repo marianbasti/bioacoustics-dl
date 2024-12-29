@@ -59,11 +59,9 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
             for line in ldf:
                 if line.strip() == "":
                     continue
-                items = line.split(",")
-                idx = items[0]
-                lbl = items[1]
-                assert lbl not in labels, lbl
-                labels[lbl] = idx
+                idx, species = line.strip().split(",")
+                assert species not in labels, species
+                labels[species] = int(idx)
         return labels
 
     @property
@@ -94,34 +92,23 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         with open(label_path, "r") as f:
             for i, line in enumerate(f):
                 if i not in skipped_indices:
-                    parts = line.rstrip().split('\t')
-                    if len(parts) > 1:
-                        label_entries = parts[1].split()
-                        # Initialize a zero vector for all possible levels for each species
-                        label_vector = [0] * len(self.labels)
-                        
+                    label_vector = [0] * len(self.labels)  # Initialize with zeros
+                    if len(line.rstrip().split('\t')) > 1:
+                        label_entries = line.rstrip().split('\t')[1].split()
                         for entry in label_entries:
                             species, level = entry.split('=')
                             if species in self.labels:
-                                # Convert level string to int (1-3) and subtract 1 for 0-based indexing
-                                label_vector[int(self.labels[species])] = int(level)
-                        
-                        labels.append(label_vector)
-                    else:
-                        # Handle empty labels case
-                        labels.append([0] * len(self.labels))
+                                label_vector[self.labels[species]] = int(level)
+                    labels.append(label_vector)
 
-        assert len(labels) == len(self.datasets[split]), (
-            f"labels length ({len(labels)}) and dataset length "
-            f"({len(self.datasets[split])}) do not match"
-        )
+        assert len(labels) == len(self.datasets[split])
 
         self.datasets[split] = AddClassTargetDataset(
             self.datasets[split],
             labels,
-            multi_class=True,  # Set to True for multi-level classification
+            multi_class=True,
             add_to_input=True,
-            num_classes=len(self.labels),
+            num_classes=len(self.labels)
         )
 
     def build_model(self, model_cfg: MaeImageClassificationConfig, from_checkpoint=False):
@@ -135,30 +122,33 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         return model
     
     def calculate_stats(self, output, target):
-
         classes_num = target.shape[-1]
         stats = []
-        
-        if self.cfg.esc50_eval  or self.cfg.spcv2_eval or not self.cfg.audio_mae:
-            
-            # Accuracy, only used for single-label classification such as esc-50, not for multiple label one such as AudioSet
-            accuracy = sklearn_metrics.accuracy_score(np.argmax(target, 1), np.argmax(output, 1)) 
-            dict = {"accuracy": accuracy}
-            stats.append(dict)
-            
-        # Class-wise statistics
-        else:
-            for k in range(classes_num):
-                # Average precision
-                avg_precision = sklearn_metrics.average_precision_score(
-                    target[:, k], output[:, k], average=None
-                )
 
-                dict = {
-                    "AP": avg_precision,
-                }
-                
-                stats.append(dict)
+        # Calculate Mean Squared Error for level prediction
+        mse = np.mean((output - target) ** 2)
+        
+        # Calculate accuracy per level
+        correct_levels = np.sum(np.round(output) == target)
+        total_levels = output.size
+        level_accuracy = correct_levels / total_levels
+
+        # Per-class statistics
+        for k in range(classes_num):
+            # Calculate metrics for each species
+            mse_class = np.mean((output[:, k] - target[:, k]) ** 2)
+            
+            dict = {
+                "MSE": mse_class,
+            }
+            stats.append(dict)
+
+        # Add global metrics
+        stats.append({
+            "global_MSE": mse,
+            "level_accuracy": level_accuracy
+        })
+        
         return stats
     
     
