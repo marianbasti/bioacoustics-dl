@@ -90,7 +90,16 @@ def write_label_files(extracted_data, output_dir):
                     if level != '0':  # If species is present
                         present_labels.append(species)
                 if present_labels:  # Only write if there are present labels
-                    f.write(f"{base_filename}\t{','.join(present_labels)}\n")
+                    f.write(f"{base_filename.replace('.wav','')},{','.join(present_labels)}\n")
+    
+    # Split data
+    cutoff = int(0.8 * len(extracted_data))
+    train_data = extracted_data[:cutoff]
+    eval_data = extracted_data[cutoff:]
+    
+    # Write both train and eval label files
+    write_set(train_data, "train.lbl")
+    write_set(eval_data, "eval.lbl")
 
 def write_tsv_files(extracted_data, audio_dir, output_dir):
     """Write train.tsv and eval.tsv with recursive audio paths."""
