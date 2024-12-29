@@ -10,6 +10,49 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
+def calculate_class_weights(extracted_data, unique_labels):
+    """Calculate inverse frequency weights for each sample"""
+    logging.info("Calculating class weights")
+    
+    # Count occurrences of each species level combination
+    label_counts = {}
+    total_samples = len(extracted_data)
+    
+    for _, labels_str in extracted_data:
+        label_dict = {}
+        for label in labels_str.split(','):
+            species, level = label.split('=')
+            if level != '0':  # Only count present species
+                label_dict[species] = level
+                
+        # Create unique key from present species
+        key = tuple(sorted(label_dict.items()))
+        label_counts[key] = label_counts.get(key, 0) + 1
+    
+    # Calculate weights as inverse frequencies
+    weights = []
+    for filename, labels_str in extracted_data:
+        label_dict = {}
+        for label in labels_str.split(','):
+            species, level = label.split('=')
+            if level != '0':
+                label_dict[species] = level
+                
+        key = tuple(sorted(label_dict.items()))
+        count = label_counts[key]
+        weight = total_samples / (len(label_counts) * count) if count > 0 else 1.0
+        weights.append(weight)
+    
+    return weights
+
+def write_weights_file(weights, output_dir):
+    """Write sample weights to file"""
+    output_path = os.path.join(output_dir, "weight_train_all.csv")
+    logging.info(f"Writing weights to {output_path}")
+    with open(output_path, 'w') as f:
+        for weight in weights:
+            f.write(f"{weight}\n")
+
 def extract_labels_from_file(input_file, audio_dir):
     """
     Extract labels dynamically from the input CSV file. The function will:
@@ -183,6 +226,10 @@ def main():
         # Write TSV files with audio durations
         write_tsv_files(extracted_data, args.audio_dir, args.output_dir)
         write_label_files(extracted_data, args.output_dir, args.audio_dir)
+
+        weights = calculate_class_weights(extracted_data, unique_labels)
+        write_weights_file(weights, args.output_dir)
+
         logging.info("Process completed successfully")
 
 if __name__ == "__main__":
