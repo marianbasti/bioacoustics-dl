@@ -39,7 +39,7 @@ class MaeImageClassificationConfig(MaeImagePretrainingConfig):
 
 
 @register_task("anuraset_classification", dataclass=MaeImageClassificationConfig)
-class MaeImageClassificationTask(MaeImagePretrainingTask):
+class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
     """ """
 
     cfg: MaeImageClassificationConfig
