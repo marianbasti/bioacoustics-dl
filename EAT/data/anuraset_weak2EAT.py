@@ -2,7 +2,7 @@ import csv
 import argparse
 import os
 
-def extract_labels_from_file(input_file):
+def extract_labels_from_file(input_file, audio_dir):
     """
     Extract labels dynamically from the input CSV file. The function will:
     - Read the species columns from the header (excluding the first two columns).
@@ -10,6 +10,7 @@ def extract_labels_from_file(input_file):
     
     Args:
     - input_file (str): The path to the CSV file containing the data.
+    - audio_dir (str): The base directory for audio files.
     
     Returns:
     - list of tuples: Each tuple contains a filename and a comma-separated string of species labels.
@@ -24,7 +25,7 @@ def extract_labels_from_file(input_file):
         species_columns = headers[2:]
         
         for row in reader:
-            filename = f"{row[0]}/{row[1]}.wav"
+            filename = os.path.join(audio_dir, f"{row[0]}/{row[1]}.wav")
             labels = []
             
             # Iterate over the species columns (starting from index 2)
@@ -116,7 +117,7 @@ def main():
     parser.add_argument("--audio_dir", help="Directory containing the audio files.")
     args = parser.parse_args()
     
-    extracted_data = extract_labels_from_file(args.input_file)
+    extracted_data = extract_labels_from_file(args.input_file, args.audio_dir)
     
     if args.output_dir and args.audio_dir:
         os.makedirs(args.output_dir, exist_ok=True)
