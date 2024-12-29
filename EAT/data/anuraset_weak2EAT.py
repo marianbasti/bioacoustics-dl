@@ -120,7 +120,7 @@ def write_label_files(extracted_data, output_dir, audio_dir):
                 # Write as species=level pairs
                 level_labels = [f"{species}={level_dict.get(species, '0')}" 
                               for species in sorted(set(s.split('=')[0] for s in labels.split(',')))]
-                if any(l.endswith(('1','2','3')) for l in level_labels):
+                if any(l.endswith(('0','1','2','3')) for l in level_labels):
                     f.write(f"{base_filename}\t{' '.join(level_labels)}\n")
 
     # Split data
