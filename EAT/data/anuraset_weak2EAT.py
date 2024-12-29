@@ -76,51 +76,49 @@ def collect_audio_files(audio_dir):
     print(f"Found {len(audio_files)} audio files.")
     return audio_files
 
+def write_label_files(extracted_data, output_dir):
+    """Write train.lbl and eval.lbl files."""
+    def write_set(data, output_file):
+        with open(os.path.join(output_dir, output_file), "w") as f:
+            for filename, labels in data:
+                # Get base filename without extension
+                base_filename = os.path.splitext(os.path.basename(filename))[0]
+                # Convert label format from "species=level" to just species for present species
+                present_labels = []
+                for label in labels.split(','):
+                    species, level = label.split('=')
+                    if level != '0':  # If species is present
+                        present_labels.append(species)
+                if present_labels:  # Only write if there are present labels
+                    f.write(f"{base_filename}\t{','.join(present_labels)}\n")
+
 def write_tsv_files(extracted_data, audio_dir, output_dir):
     """Write train.tsv and eval.tsv with recursive audio paths."""
-    
-    # Debug: Print audio_dir
-    print(f"Audio directory: {audio_dir}")
-    
-    # Create a dictionary of normalized relative paths
     audio_files = {}
     for path, samples in collect_audio_files(audio_dir):
-        normalized_path = os.path.normpath(path)  # normalize case
+        normalized_path = os.path.normpath(path)
         audio_files[normalized_path] = (path, samples)
     
-    # Debug: Print some paths from audio_files
-    print("Sample paths in audio_files:")
-    for k in list(audio_files.keys())[:3]:
-        print(f"  {k}")
-    
     def write_set(data, output_file):
-        matched = 0
         with open(os.path.join(output_dir, output_file), "w") as f:
             f.write(f"{audio_dir}\n")
             for filename, _ in data:
-                # Convert the CSV filename to match audio_files format
-                rel_path = os.path.normpath(filename)  # normalize case
-                
-                # Debug: Print paths being compared
-                print(f"\nLooking for: {rel_path}")
-                print(f"Available paths: {list(audio_files.keys())[:3]}")
-                
+                rel_path = os.path.normpath(filename)
                 if rel_path in audio_files:
                     path, num_samples = audio_files[rel_path]
-                    f.write(f"{path} {num_samples}\n")
-                    matched += 1
-                else:
-                    print(f"Warning: Could not find {rel_path}")
-        
-        print(f"{output_file}: Matched {matched} out of {len(data)} files")
+                    base_filename = os.path.basename(path)
+                    f.write(f"{base_filename}\t{num_samples}\n")
     
-    # Split and write sets
+    # Split data
     cutoff = int(0.8 * len(extracted_data))
     train_data = extracted_data[:cutoff]
     eval_data = extracted_data[cutoff:]
     
+    # Write both TSV and LBL files
     write_set(train_data, "train.tsv")
     write_set(eval_data, "eval.tsv")
+    write_label_files(train_data, "train.lbl")
+    write_label_files(eval_data, "eval.lbl")
 
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
