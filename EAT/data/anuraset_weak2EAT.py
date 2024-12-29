@@ -71,6 +71,7 @@ def collect_audio_files(audio_dir):
                 rel_path = os.path.relpath(full_path, audio_dir)
                 audio_files.append((rel_path, num_samples))
     
+    print(f"Found {len(audio_files)} audio files.")
     return audio_files
 
 def write_tsv_files(extracted_data, audio_dir, output_dir):
