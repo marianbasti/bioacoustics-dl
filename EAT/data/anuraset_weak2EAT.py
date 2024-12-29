@@ -90,7 +90,7 @@ def write_label_files(extracted_data, output_dir):
                     if level != '0':  # If species is present
                         present_labels.append(species)
                 if present_labels:  # Only write if there are present labels
-                    f.write(f"{base_filename.replace('.wav','')},{','.join(present_labels)}\n")
+                    f.write(f"{base_filename.replace('.wav','')}\t{','.join(present_labels)}\n")
     
     # Split data
     cutoff = int(0.8 * len(extracted_data))
