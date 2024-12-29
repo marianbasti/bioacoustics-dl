@@ -6,7 +6,6 @@ BATCH_SIZE=96
 MODEL_PATH=""
 SAVE_DIR=""
 DATA_PATH=""
-NUM_CLASSES=527
 TARGET_LENGTH=1024
 MIXUP=0.8
 MASK_RATIO=0.2
@@ -38,10 +37,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --data_path)
             DATA_PATH="$2"
-            shift 2
-            ;;
-        --num_classes)
-            NUM_CLASSES="$2"
             shift 2
             ;;
         --target_length)
@@ -121,7 +116,6 @@ python fairseq_cli/hydra_train.py -m \
     task.target_length=$TARGET_LENGTH \
     task.roll_aug=true \
     model.model_path=$MODEL_PATH \
-    model.num_classes=$NUM_CLASSES \
     model.mixup=$MIXUP \
     ++model.mask_ratio=$MASK_RATIO \
     model.prediction_mode=PredictionMode.$PREDICTION_MODE

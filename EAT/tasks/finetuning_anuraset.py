@@ -112,6 +112,9 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         )
 
     def build_model(self, model_cfg: MaeImageClassificationConfig, from_checkpoint=False):
+        # Set num_classes based on number of species in label_descriptors
+        model_cfg.num_classes = len(self.labels)
+        
         model = super().build_model(model_cfg, from_checkpoint)
 
         actualized_cfg = getattr(model, "cfg", None)
