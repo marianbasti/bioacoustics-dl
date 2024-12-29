@@ -88,45 +88,28 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         label_path = os.path.join(data_path, f"{split}.{task_cfg.labels}")
         skipped_indices = getattr(self.datasets[split], "skipped_indices", set())
         
-        # First collect all filenames from the dataset
-        dataset_files = set()
-        for i in range(len(self.datasets[split])):
-            if i not in skipped_indices:
-                filename = self.datasets[split].get_filename(i)
-                if filename:
-                    dataset_files.add(os.path.splitext(os.path.basename(filename))[0])
-        
-        logger.info(f"Found {len(dataset_files)} files in dataset for split {split}")
-        
-        # Read labels and match with dataset files
-        labels = []
-        label_files = set()
+        # Read all labels first
+        all_labels = []
         with open(label_path, "r") as f:
             for line in f:
-                if line.strip():
-                    parts = line.rstrip().split('\t')
-                    filename = parts[0]
-                    label_files.add(filename)
-                    
-                    if filename in dataset_files:
-                        label_vector = [0] * len(self.labels)
-                        if len(parts) > 1:
-                            label_entries = parts[1].split()
-                            for entry in label_entries:
-                                species, level = entry.split('=')
-                                if species in self.labels:
-                                    label_vector[self.labels[species]] = int(level)
-                        labels.append(label_vector)
-        
-        logger.info(f"Found {len(labels)} labels for split {split}")
-        logger.info(f"Dataset size: {len(self.datasets[split])}")
-        logger.info(f"Files in labels but not in dataset: {len(label_files - dataset_files)}")
-        logger.info(f"Files in dataset but not in labels: {len(dataset_files - label_files)}")
+                label_vector = [0] * len(self.labels)  # Initialize with zeros
+                if len(line.rstrip().split('\t')) > 1:
+                    label_entries = line.rstrip().split('\t')[1].split()
+                    for entry in label_entries:
+                        species, level = entry.split('=')
+                        if species in self.labels:
+                            label_vector[self.labels[species]] = int(level)
+                all_labels.append(label_vector)
 
-        assert len(labels) == len(self.datasets[split]), (
-            f"labels length ({len(labels)}) and dataset length "
-            f"({len(self.datasets[split])}) do not match for split {split}"
-        )
+        # Filter out skipped indices
+        labels = [label for i, label in enumerate(all_labels) if i not in skipped_indices]
+        
+        if len(labels) != len(self.datasets[split]):
+            logger.warning(
+                f"Number of labels ({len(labels)}) does not match dataset size ({len(self.datasets[split])}) "
+                f"for split {split}. This might indicate a mismatch between audio files and labels."
+            )
+            raise AssertionError("Label count mismatch with dataset size")
 
         self.datasets[split] = AddClassTargetDataset(
             self.datasets[split],
@@ -143,9 +126,8 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         model = super().build_model(model_cfg, from_checkpoint)
 
         actualized_cfg = getattr(model, "cfg", None)
-        if actualized_cfg is not None:
-            if hasattr(actualized_cfg, "pretrained_model_args"):
-                model_cfg.pretrained_model_args = actualized_cfg.pretrained_model_args
+        if (actualized_cfg is not None) and hasattr(actualized_cfg, "pretrained_model_args"):
+            model_cfg.pretrained_model_args = actualized_cfg.pretrained_model_args
 
         return model
     
