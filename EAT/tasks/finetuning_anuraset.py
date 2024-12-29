@@ -89,18 +89,27 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
                 
         label_path = os.path.join(data_path, f"{split}.{task_cfg.labels}")
         skipped_indices = getattr(self.datasets[split], "skipped_indices", set())
-        # print(self.datasets[split].skipped_indices)
+        
         labels = []
         with open(label_path, "r") as f:
             for i, line in enumerate(f):
                 if i not in skipped_indices:
-                    lbl_items = line.rstrip().split()
-                    # Each x is "species=LEVEL", parse LEVEL as integer for classification
-                    numeric_levels = []
-                    for x in lbl_items[1].split("\t"):
-                        species, level = x.split("=")
-                        numeric_levels.append(int(level))
-                    labels.append(numeric_levels)
+                    parts = line.rstrip().split('\t')
+                    if len(parts) > 1:
+                        label_entries = parts[1].split()
+                        # Initialize a zero vector for all possible levels for each species
+                        label_vector = [0] * len(self.labels)
+                        
+                        for entry in label_entries:
+                            species, level = entry.split('=')
+                            if species in self.labels:
+                                # Convert level string to int (1-3) and subtract 1 for 0-based indexing
+                                label_vector[int(self.labels[species])] = int(level)
+                        
+                        labels.append(label_vector)
+                    else:
+                        # Handle empty labels case
+                        labels.append([0] * len(self.labels))
 
         assert len(labels) == len(self.datasets[split]), (
             f"labels length ({len(labels)}) and dataset length "
@@ -110,7 +119,7 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         self.datasets[split] = AddClassTargetDataset(
             self.datasets[split],
             labels,
-            multi_class=False,  # If you want a single 4-class per species sample, set as needed
+            multi_class=True,  # Set to True for multi-level classification
             add_to_input=True,
             num_classes=len(self.labels),
         )

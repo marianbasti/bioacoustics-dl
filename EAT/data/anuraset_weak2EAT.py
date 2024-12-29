@@ -77,21 +77,20 @@ def collect_audio_files(audio_dir):
     return audio_files
 
 def write_label_files(extracted_data, output_dir):
-    """Write train.lbl and eval.lbl files."""
+    """Write train.lbl and eval.lbl files preserving species level information."""
     def write_set(data, output_file):
         with open(os.path.join(output_dir, output_file), "w") as f:
             for filename, labels in data:
-                # Get base filename without extension
                 base_filename = os.path.splitext(os.path.basename(filename))[0]
-                # Convert label format from "species=level" to just species for present species
-                present_labels = []
+                # Keep the full species=level format
+                level_labels = []
                 for label in labels.split(','):
                     species, level = label.split('=')
-                    if level != '0':  # If species is present
-                        present_labels.append(species)
-                if present_labels:  # Only write if there are present labels
-                    f.write(f"{base_filename.replace('.wav','')}\t{','.join(present_labels)}\n")
-    
+                    if level != '0':  # Only include present species (levels 1-3)
+                        level_labels.append(f"{species}={level}")
+                if level_labels:  # Only write if there are present labels
+                    f.write(f"{base_filename.replace('.wav','')}\t{' '.join(level_labels)}\n")
+
     # Split data
     cutoff = int(0.8 * len(extracted_data))
     train_data = extracted_data[:cutoff]
