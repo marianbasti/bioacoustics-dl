@@ -94,12 +94,23 @@ def collect_audio_files(audio_dir):
     logging.info(f"Found {len(audio_files)} valid audio files. Skipped {skipped_files} files with errors.")
     return audio_files
 
-def write_label_files(extracted_data, output_dir):
+def write_label_files(extracted_data, output_dir, audio_dir):
     logging.info("Writing label files")
+    
+    # First get valid audio files
+    audio_files = {os.path.normpath(path): samples 
+                  for path, samples in collect_audio_files(audio_dir)}
+    
     def write_set(data, output_file):
         with open(os.path.join(output_dir, output_file), "w") as f:
             for filename, labels in data:
+                # Check if audio file exists
+                norm_path = os.path.normpath(filename)
+                if norm_path not in audio_files:
+                    continue
+                    
                 base_filename = os.path.splitext(os.path.basename(filename))[0]
+                
                 # Convert to species-level format
                 level_dict = {}
                 for label in labels.split(','):
@@ -110,15 +121,13 @@ def write_label_files(extracted_data, output_dir):
                 level_labels = [f"{species}={level_dict.get(species, '0')}" 
                               for species in sorted(set(s.split('=')[0] for s in labels.split(',')))]
                 if any(l.endswith(('1','2','3')) for l in level_labels):
-                    f.write(f"{base_filename.replace('.wav','')}\t{' '.join(level_labels)}\n")
+                    f.write(f"{base_filename}\t{' '.join(level_labels)}\n")
 
     # Split data
     cutoff = int(0.8 * len(extracted_data))
-    logging.info(f"Split data: {cutoff} training samples, {len(extracted_data) - cutoff} evaluation samples")
     train_data = extracted_data[:cutoff]
     eval_data = extracted_data[cutoff:]
     
-    # Write both train and eval label files
     write_set(train_data, "train.lbl")
     write_set(eval_data, "eval.lbl")
     logging.info("Finished writing label files")
@@ -173,7 +182,7 @@ def main():
         
         # Write TSV files with audio durations
         write_tsv_files(extracted_data, args.audio_dir, args.output_dir)
-        write_label_files(extracted_data, args.output_dir)
+        write_label_files(extracted_data, args.output_dir, args.audio_dir)
         logging.info("Process completed successfully")
 
 if __name__ == "__main__":
