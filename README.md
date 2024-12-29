@@ -124,6 +124,7 @@ La visualización interactiva incluye:
 - Análisis de componentes principales
 - Visualización de patrones temporales
 - Exploración interactiva de características
+
 ## Entrenamiento del Modelo EAT
 
 ### Preentrenamiento
@@ -153,17 +154,16 @@ Principales parámetros de preentrenamiento:
 
 ### Finetuning
 
-Después del preentrenamiento, el modelo puede ser ajustado en datos etiquetados:
+Después del preentrenamiento, podemos entrenar al modelo para que catogorice audios. Se le añade una layer final y se continúa entrenando con datos etiquetados.
 
 ```bash
 ./scripts/finetune.sh \
   --model_path ./checkpoints/pretrain/checkpoint_best.pt \
   --save_dir ./checkpoints/finetune \
   --data_dir ./data/labeled/audio \
-  --labels ./data/labeled/labels.csv \
-  --cuda 0 \
+  --labels ./data/labeled/labels_descriptors.csv 0 \
   --batch_size 96 \
-  --num_classes 527 \
+  --num_classes 29 \
   --target_length 1024 \
   --mixup 0.8 \
   --mask_ratio 0.2 \
@@ -211,6 +211,16 @@ Si utilizas este código en tu investigación, por favor cita:
   author = {Myle Ott and Sergey Edunov and Alexei Baevski and Angela Fan and Sam Gross and Nathan Ng and David Grangier and Michael Auli},
   booktitle = {Proceedings of NAACL-HLT 2019: Demonstrations},
   year = {2019},
+}
+```
+```bibtex
+@article{Cañas2023dataset,
+  title = {A dataset for benchmarking Neotropical anuran calls identification in passive acoustic monitoring},
+  author = {Cañas, J.S. and Toro-Gómez, M.P. and Sugai, L.S.M. and others},
+  publisher = {Nature Publishing Group},
+  journal = {Sci Data},
+  year = {2023},
+  doi = {10.1038/s41597-023-02666-2}
 }
 ```
 ```bibtex
