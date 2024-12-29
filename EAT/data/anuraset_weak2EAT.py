@@ -1,6 +1,14 @@
 import csv
 import argparse
 import os
+import logging
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 def extract_labels_from_file(input_file, audio_dir):
     """
@@ -15,6 +23,7 @@ def extract_labels_from_file(input_file, audio_dir):
     Returns:
     - list of tuples: Each tuple contains a filename and a comma-separated string of species labels.
     """
+    logging.info(f"Reading labels from {input_file}")
     extracted_data = []
     
     with open(input_file, mode='r', newline='') as file:
@@ -23,7 +32,9 @@ def extract_labels_from_file(input_file, audio_dir):
         
         # Extract species column names (skip the first two columns: MONITORING_SITE, AUDIO_FILE_ID)
         species_columns = headers[2:]
+        logging.info(f"Found {len(species_columns)} species columns")
         
+        row_count = 0
         for row in reader:
             # Create relative path instead of full path
             filename = os.path.normpath(f"{row[0]}/{row[1]}.wav")
@@ -38,15 +49,19 @@ def extract_labels_from_file(input_file, audio_dir):
             # Join the labels into a single string, separated by commas
             labels_str = ','.join(labels)
             extracted_data.append((filename, labels_str))
-    
+            row_count += 1
+        
+        logging.info(f"Processed {row_count} entries from CSV file")
     return extracted_data
 
 def get_unique_labels(extracted_data):
+    logging.info("Extracting unique labels")
     # Get all unique labels
     unique_labels = set()
     for _, labels_str in extracted_data:
         labels = labels_str.split(',')
         unique_labels.update(labels)
+    logging.info(f"Found {len(unique_labels)} unique labels")
     return sorted(list(unique_labels))
 
 def write_label_descriptors(labels, output_path):
@@ -55,10 +70,11 @@ def write_label_descriptors(labels, output_path):
             f.write(f"{label},{idx}\n")
 
 def collect_audio_files(audio_dir):
-    """Recursively collect all audio files and their metadata."""
+    logging.info(f"Collecting audio files from {audio_dir}")
     import soundfile as sf
     audio_files = []
     
+    skipped_files = 0
     for root, _, files in os.walk(audio_dir):
         for file in files:
             if file.endswith(('.wav', '.WAV')):
@@ -66,17 +82,18 @@ def collect_audio_files(audio_dir):
                 try:
                     info = sf.info(full_path)
                     num_samples = int(info.frames)
-                except Exception:
-                    # skip file if there's an error reading it
-                    print(f"Error reading {full_path}")
+                except Exception as e:
+                    skipped_files += 1
+                    logging.error(f"Error reading {full_path}: {str(e)}")
                     continue
                 rel_path = os.path.relpath(full_path, audio_dir)
                 audio_files.append((rel_path, num_samples))
     
-    print(f"Found {len(audio_files)} audio files.")
+    logging.info(f"Found {len(audio_files)} valid audio files. Skipped {skipped_files} files with errors.")
     return audio_files
 
 def write_label_files(extracted_data, output_dir):
+    logging.info("Writing label files")
     """Write train.lbl and eval.lbl files preserving species level information."""
     def write_set(data, output_file):
         with open(os.path.join(output_dir, output_file), "w") as f:
@@ -93,20 +110,24 @@ def write_label_files(extracted_data, output_dir):
 
     # Split data
     cutoff = int(0.8 * len(extracted_data))
+    logging.info(f"Split data: {cutoff} training samples, {len(extracted_data) - cutoff} evaluation samples")
     train_data = extracted_data[:cutoff]
     eval_data = extracted_data[cutoff:]
     
     # Write both train and eval label files
     write_set(train_data, "train.lbl")
     write_set(eval_data, "eval.lbl")
+    logging.info("Finished writing label files")
 
 def write_tsv_files(extracted_data, audio_dir, output_dir):
+    logging.info("Writing TSV files")
     """Write train.tsv and eval.tsv with recursive audio paths."""
     audio_files = {}
     for path, samples in collect_audio_files(audio_dir):
         normalized_path = os.path.normpath(path)
         audio_files[normalized_path] = (path, samples)
     
+    logging.info(f"Found {len(audio_files)} audio files for TSV generation")
     def write_set(data, output_file):
         with open(os.path.join(output_dir, output_file), "w") as f:
             f.write(f"{audio_dir}\n")
@@ -125,6 +146,7 @@ def write_tsv_files(extracted_data, audio_dir, output_dir):
     # Write both TSV and LBL files
     write_set(train_data, "train.tsv")
     write_set(eval_data, "eval.tsv")
+    logging.info("Finished writing TSV files")
 
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
@@ -133,9 +155,11 @@ def main():
     parser.add_argument("--audio_dir", help="Directory containing the audio files.")
     args = parser.parse_args()
     
+    logging.info("Starting label extraction process")
     extracted_data = extract_labels_from_file(args.input_file, args.audio_dir)
     
     if args.output_dir and args.audio_dir:
+        logging.info(f"Writing output files to {args.output_dir}")
         os.makedirs(args.output_dir, exist_ok=True)
         
         # Generate label_descriptors.csv
@@ -146,6 +170,7 @@ def main():
         # Write TSV files with audio durations
         write_tsv_files(extracted_data, args.audio_dir, args.output_dir)
         write_label_files(extracted_data, args.output_dir)
+        logging.info("Process completed successfully")
 
 if __name__ == "__main__":
     main()
