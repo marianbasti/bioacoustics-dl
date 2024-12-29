@@ -126,8 +126,6 @@ def write_tsv_files(extracted_data, audio_dir, output_dir):
     # Write both TSV and LBL files
     write_set(train_data, "train.tsv")
     write_set(eval_data, "eval.tsv")
-    write_label_files(train_data, "train.lbl")
-    write_label_files(eval_data, "eval.lbl")
 
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
@@ -148,6 +146,7 @@ def main():
         
         # Write TSV files with audio durations
         write_tsv_files(extracted_data, args.audio_dir, args.output_dir)
+        write_label_files(extracted_data, args.output_dir)
 
 if __name__ == "__main__":
     main()
