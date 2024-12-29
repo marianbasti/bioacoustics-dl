@@ -79,34 +79,46 @@ def collect_audio_files(audio_dir):
 def write_tsv_files(extracted_data, audio_dir, output_dir):
     """Write train.tsv and eval.tsv with recursive audio paths."""
     
+    # Debug: Print audio_dir
+    print(f"Audio directory: {audio_dir}")
+    
     # Create a dictionary of normalized relative paths
     audio_files = {}
     for path, samples in collect_audio_files(audio_dir):
-        normalized_path = os.path.normpath(path)
+        normalized_path = os.path.normpath(path)  # normalize case
         audio_files[normalized_path] = (path, samples)
     
-    # Split into train/eval
-    cutoff = int(0.8 * len(extracted_data))
-    train_data = extracted_data[:cutoff]
-    eval_data = extracted_data[cutoff:]
+    # Debug: Print some paths from audio_files
+    print("Sample paths in audio_files:")
+    for k in list(audio_files.keys())[:3]:
+        print(f"  {k}")
     
     def write_set(data, output_file):
+        matched = 0
         with open(os.path.join(output_dir, output_file), "w") as f:
             f.write(f"{audio_dir}\n")
             for filename, _ in data:
-                # Normalize the path and remove audio_dir prefix if present
-                rel_path = os.path.normpath(filename)
-                if rel_path.startswith(audio_dir):
-                    rel_path = os.path.relpath(rel_path, audio_dir)
-                rel_path = os.path.normpath(rel_path)
+                # Convert the CSV filename to match audio_files format
+                rel_path = os.path.normpath(filename)  # normalize case
+                
+                # Debug: Print paths being compared
+                print(f"\nLooking for: {rel_path}")
+                print(f"Available paths: {list(audio_files.keys())[:3]}")
                 
                 if rel_path in audio_files:
                     path, num_samples = audio_files[rel_path]
                     f.write(f"{path} {num_samples}\n")
+                    matched += 1
                 else:
                     print(f"Warning: Could not find {rel_path}")
+        
+        print(f"{output_file}: Matched {matched} out of {len(data)} files")
     
-    # Write train and eval sets
+    # Split and write sets
+    cutoff = int(0.8 * len(extracted_data))
+    train_data = extracted_data[:cutoff]
+    eval_data = extracted_data[cutoff:]
+    
     write_set(train_data, "train.tsv")
     write_set(eval_data, "eval.tsv")
 
