@@ -25,7 +25,8 @@ def extract_labels_from_file(input_file, audio_dir):
         species_columns = headers[2:]
         
         for row in reader:
-            filename = os.path.join(audio_dir, f"{row[0]}/{row[1]}.wav")
+            # Create relative path instead of full path
+            filename = os.path.normpath(f"{row[0]}/{row[1]}.wav")
             labels = []
             
             # Iterate over the species columns (starting from index 2)
@@ -78,37 +79,36 @@ def collect_audio_files(audio_dir):
 def write_tsv_files(extracted_data, audio_dir, output_dir):
     """Write train.tsv and eval.tsv with recursive audio paths."""
     
-    # Collect all audio files recursively - store full relative paths
-    audio_files = {path: (path, samples) 
-                  for path, samples in collect_audio_files(audio_dir)}
+    # Create a dictionary of normalized relative paths
+    audio_files = {}
+    for path, samples in collect_audio_files(audio_dir):
+        normalized_path = os.path.normpath(path)
+        audio_files[normalized_path] = (path, samples)
     
     # Split into train/eval
     cutoff = int(0.8 * len(extracted_data))
     train_data = extracted_data[:cutoff]
     eval_data = extracted_data[cutoff:]
     
-    # Write train.tsv
-    with open(os.path.join(output_dir, "train.tsv"), "w") as f:
-        f.write(f"{audio_dir}\n")
-        for filename, _ in train_data:
-            # Match against full relative path
-            rel_path = os.path.join(os.path.dirname(filename), os.path.basename(filename))
-            if rel_path in audio_files:
-                path, num_samples = audio_files[rel_path]
-                f.write(f"{path} {num_samples}\n")
-            else:
-                print(f"Warning: Could not find {rel_path}")
+    def write_set(data, output_file):
+        with open(os.path.join(output_dir, output_file), "w") as f:
+            f.write(f"{audio_dir}\n")
+            for filename, _ in data:
+                # Normalize the path and remove audio_dir prefix if present
+                rel_path = os.path.normpath(filename)
+                if rel_path.startswith(audio_dir):
+                    rel_path = os.path.relpath(rel_path, audio_dir)
+                rel_path = os.path.normpath(rel_path)
+                
+                if rel_path in audio_files:
+                    path, num_samples = audio_files[rel_path]
+                    f.write(f"{path} {num_samples}\n")
+                else:
+                    print(f"Warning: Could not find {rel_path}")
     
-    # Write eval.tsv  
-    with open(os.path.join(output_dir, "eval.tsv"), "w") as f:
-        f.write(f"{audio_dir}\n")
-        for filename, _ in eval_data:
-            rel_path = os.path.join(os.path.dirname(filename), os.path.basename(filename))
-            if rel_path in audio_files:
-                path, num_samples = audio_files[rel_path]
-                f.write(f"{path} {num_samples}\n")
-            else:
-                print(f"Warning: Could not find {rel_path}")
+    # Write train and eval sets
+    write_set(train_data, "train.tsv")
+    write_set(eval_data, "eval.tsv")
 
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
