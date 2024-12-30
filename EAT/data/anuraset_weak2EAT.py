@@ -2,6 +2,7 @@ import csv
 import argparse
 import os
 import logging
+import numpy as np
 
 # Set up logging
 logging.basicConfig(
@@ -10,48 +11,51 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
-def calculate_class_weights(extracted_data, unique_labels):
-    """Calculate inverse frequency weights for each sample"""
-    logging.info("Calculating class weights")
-    
-    # Count occurrences of each species level combination
+def calculate_split_weights(data, audio_files):
+    """Calculate normalized weights for valid audio files only"""
     label_counts = {}
-    total_samples = len(extracted_data)
+    valid_samples = []
     
-    for _, labels_str in extracted_data:
-        label_dict = {}
-        for label in labels_str.split(','):
-            species, level = label.split('=')
-            if level != '0':  # Only count present species
-                label_dict[species] = level
-                
-        # Create unique key from present species
+    # First pass - count valid combinations
+    for filename, labels_str in data:
+        norm_path = os.path.normpath(filename)
+        if norm_path not in audio_files:
+            continue
+            
+        label_dict = {
+            species: level 
+            for label in labels_str.split(',')
+            for species, level in [label.split('=')] 
+            if level != '0'
+        }
+        
         key = tuple(sorted(label_dict.items()))
         label_counts[key] = label_counts.get(key, 0) + 1
+        valid_samples.append((filename, key))
     
-    # Calculate weights as inverse frequencies
+    total_valid = len(valid_samples)
+    
+    # Calculate weights for valid samples
     weights = []
-    for filename, labels_str in extracted_data:
-        label_dict = {}
-        for label in labels_str.split(','):
-            species, level = label.split('=')
-            if level != '0':
-                label_dict[species] = level
-                
-        key = tuple(sorted(label_dict.items()))
+    for filename, key in valid_samples:
         count = label_counts[key]
-        weight = total_samples / (len(label_counts) * count) if count > 0 else 1.0
+        weight = total_valid / (len(label_counts) * count)
         weights.append(weight)
+    
+    # Normalize weights to sum to 1
+    weights = np.array(weights)
+    weights = weights / weights.sum()
     
     return weights
 
-def write_weights_file(weights, output_dir):
-    """Write sample weights to file"""
-    output_path = os.path.join(output_dir, "weight_train_all.csv")
-    logging.info(f"Writing weights to {output_path}")
-    with open(output_path, 'w') as f:
-        for weight in weights:
-            f.write(f"{weight}\n")
+def write_weights_file(train_data, audio_files, output_dir):
+    """Write normalized weights for training set"""
+    weights = calculate_split_weights(train_data, audio_files)
+    
+    output_path = os.path.join(output_dir, "weight_train_all.csv") 
+    logging.info(f"Writing {len(weights)} weights to {output_path}")
+    
+    np.savetxt(output_path, weights)
 
 def extract_labels_from_file(input_file, audio_dir):
     """
@@ -218,6 +222,16 @@ def main():
         logging.info(f"Writing output files to {args.output_dir}")
         os.makedirs(args.output_dir, exist_ok=True)
         
+        audio_files = {os.path.normpath(path): samples 
+                for path, samples in collect_audio_files(args.audio_dir)}
+
+        # Split data
+        cutoff = int(0.8 * len(extracted_data))
+        train_data = extracted_data[:cutoff]
+        
+        # Write weights only for training set
+        write_weights_file(train_data, audio_files, args.output_dir)
+        
         # Generate label_descriptors.csv
         unique_labels = get_unique_labels(extracted_data)
         write_label_descriptors(unique_labels, 
@@ -226,9 +240,6 @@ def main():
         # Write TSV files with audio durations
         write_tsv_files(extracted_data, args.audio_dir, args.output_dir)
         write_label_files(extracted_data, args.output_dir, args.audio_dir)
-
-        weights = calculate_class_weights(extracted_data, unique_labels)
-        write_weights_file(weights, args.output_dir)
 
         logging.info("Process completed successfully")
 
