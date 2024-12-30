@@ -138,9 +138,8 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         labels = [label for i, label in enumerate(all_labels) if i not in skipped_indices]
 
         # Add logging for label processing
-        logger.info(f"Total labels read: {len(all_labels)}")
         logger.info(f"Number of skipped indices: {len(skipped_indices)}")
-        logger.info(f"Final number of labels after filtering: {len(labels)}")
+        logger.info(f"Final number of labels after filtering: {len(all_labels)}")
         
         if len(labels) != len(self.datasets[split]):
             error_msg = (
