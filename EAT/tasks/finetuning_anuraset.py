@@ -80,36 +80,54 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         return cls(cfg)
 
     def load_dataset(self, split: str, task_cfg: MaeImageClassificationConfig = None, **kwargs):
-        super().load_dataset(split, task_cfg, **kwargs)
+        try:
+            super().load_dataset(split, task_cfg, **kwargs)
+        except Exception as e:
+            logger.error(f"Error loading dataset for split {split}: {str(e)}")
+            raise
         
         data_path = self.cfg.data
         task_cfg = task_cfg or self.cfg
                 
         label_path = os.path.join(data_path, f"{split}.{task_cfg.labels}")
+        
+        # Ensure the label file exists
+        if not os.path.exists(label_path):
+            raise FileNotFoundError(f"Label file not found: {label_path}")
+            
         skipped_indices = getattr(self.datasets[split], "skipped_indices", set())
         
-        # Read all labels first
-        all_labels = []
-        with open(label_path, "r") as f:
-            for line in f:
-                label_vector = [0] * len(self.labels)  # Initialize with zeros
-                if len(line.rstrip().split('\t')) > 1:
-                    label_entries = line.rstrip().split('\t')[1].split()
-                    for entry in label_entries:
-                        species, level = entry.split('=')
-                        if species in self.labels:
-                            label_vector[self.labels[species]] = int(level)
-                all_labels.append(label_vector)
+        # Read all labels first, with error handling
+        try:
+            all_labels = []
+            with open(label_path, "r") as f:
+                for line in f:
+                    label_vector = [0] * len(self.labels)
+                    if len(line.rstrip().split('\t')) > 1:
+                        label_entries = line.rstrip().split('\t')[1].split()
+                        for entry in label_entries:
+                            try:
+                                species, level = entry.split('=')
+                                if species in self.labels:
+                                    label_vector[self.labels[species]] = int(level)
+                            except ValueError as e:
+                                logger.warning(f"Invalid label format in line: {line.strip()}, Error: {str(e)}")
+                                continue
+                    all_labels.append(label_vector)
+        except Exception as e:
+            logger.error(f"Error reading label file {label_path}: {str(e)}")
+            raise
 
         # Filter out skipped indices
         labels = [label for i, label in enumerate(all_labels) if i not in skipped_indices]
         
         if len(labels) != len(self.datasets[split]):
-            logger.warning(
+            error_msg = (
                 f"Number of labels ({len(labels)}) does not match dataset size ({len(self.datasets[split])}) "
                 f"for split {split}. This might indicate a mismatch between audio files and labels."
             )
-            raise AssertionError("Label count mismatch with dataset size")
+            logger.error(error_msg)
+            raise AssertionError(error_msg)
 
         self.datasets[split] = AddClassTargetDataset(
             self.datasets[split],
