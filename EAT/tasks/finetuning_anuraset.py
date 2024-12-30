@@ -81,16 +81,25 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
 
     def load_dataset(self, split: str, task_cfg: MaeImageClassificationConfig = None, **kwargs):
         logger.info(f"Loading dataset for split: {split}")
+        
+        # Log the state before loading base dataset
+        logger.info(f"About to load base dataset from: {self.cfg.data}")
         try:
             super().load_dataset(split, task_cfg, **kwargs)
+            logger.info(f"Base dataset loaded. Dataset size: {len(self.datasets[split])}")
+            # Log a few sample items from the base dataset
+            for i in range(min(3, len(self.datasets[split]))):
+                sample = self.datasets[split][i]
+                logger.info(f"Sample {i} from base dataset: {sample.keys()}")
         except Exception as e:
             logger.error(f"Error loading dataset for split {split}: {str(e)}")
             raise
         
         data_path = self.cfg.data
         task_cfg = task_cfg or self.cfg
-                
+        
         label_path = os.path.join(data_path, f"{split}.{task_cfg.labels}")
+        logger.info(f"Loading labels from: {label_path}")
         
         # Ensure the label file exists
         if not os.path.exists(label_path):
@@ -121,6 +130,15 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
             logger.error(f"Error reading label file {label_path}: {str(e)}")
             raise
 
+        # Add logging for label processing
+        logger.info(f"Total labels read: {len(all_labels)}")
+        logger.info(f"Number of skipped indices: {len(skipped_indices)}")
+        logger.info(f"Final number of labels after filtering: {len(labels)}")
+        
+        # Log a few sample labels
+        for i in range(min(30, len(labels))):
+            logger.info(f"Sample label {i}: {labels[i]}")
+        
         # Filter out skipped indices
         labels = [label for i, label in enumerate(all_labels) if i not in skipped_indices]
         
@@ -139,6 +157,13 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
             add_to_input=True,
             num_classes=len(self.labels)
         )
+        
+        # Log final dataset info
+        logger.info(f"Final dataset size for split {split}: {len(self.datasets[split])}")
+        # Log a few samples from final dataset
+        for i in range(min(3, len(self.datasets[split]))):
+            sample = self.datasets[split][i]
+            logger.info(f"Final sample {i}: {sample.keys()}")
         logger.info(f"Dataset for split {split} loaded successfully with {len(labels)} labels.")
 
     def build_model(self, model_cfg: MaeImageClassificationConfig, from_checkpoint=False):
