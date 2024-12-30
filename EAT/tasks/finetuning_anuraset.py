@@ -87,10 +87,6 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         try:
             super().load_dataset(split, task_cfg, **kwargs)
             logger.info(f"Base dataset loaded. Dataset size: {len(self.datasets[split])}")
-            # Log a few sample items from the base dataset
-            for i in range(min(3, len(self.datasets[split]))):
-                sample = self.datasets[split][i]
-                logger.info(f"Sample {i} from base dataset: {sample.keys()}")
         except Exception as e:
             logger.error(f"Error loading dataset for split {split}: {str(e)}")
             raise
@@ -131,8 +127,8 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
             raise
         
         # Log a few sample labels
-        for i in range(min(30, len(labels))):
-            logger.info(f"Sample label {i}: {labels[i]}")
+        for i in range(min(10, len(all_labels))):
+            logger.info(f"Sample label {i}: {all_labels[i]}")
         
         # Filter out skipped indices
         labels = [label for i, label in enumerate(all_labels) if i not in skipped_indices]
