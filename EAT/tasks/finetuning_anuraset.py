@@ -126,16 +126,11 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
             logger.error(f"Error reading label file {label_path}: {str(e)}")
             raise
         
-        # Log a few sample labels
-        for i in range(min(10, len(all_labels))):
-            logger.info(f"Sample label {i}: {all_labels[i]}")
-        
         # Filter out skipped indices
         labels = [label for i, label in enumerate(all_labels) if i not in skipped_indices]
 
         # Add logging for label processing
         logger.info(f"Number of skipped indices: {len(skipped_indices)}")
-        logger.info(f"Final number of labels after filtering: {len(all_labels)}")
         
         if len(labels) != len(self.datasets[split]):
             error_msg = (
@@ -155,10 +150,12 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         
         # Log final dataset info
         logger.info(f"Final dataset size for split {split}: {len(self.datasets[split])}")
+        
         # Log a few samples from final dataset
         for i in range(min(3, len(self.datasets[split]))):
             sample = self.datasets[split][i]
             logger.info(f"Final sample {i}: {sample.keys()}")
+            
         logger.info(f"Dataset for split {split} loaded successfully with {len(labels)} labels.")
 
     def build_model(self, model_cfg: MaeImageClassificationConfig, from_checkpoint=False):
