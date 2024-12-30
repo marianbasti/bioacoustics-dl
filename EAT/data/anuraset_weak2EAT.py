@@ -15,11 +15,15 @@ def calculate_split_weights(data, audio_files):
     """Calculate normalized weights for valid audio files only"""
     label_counts = {}
     valid_samples = []
+    invalid_count = 0
     
     # First pass - count valid combinations
     for filename, labels_str in data:
         norm_path = os.path.normpath(filename)
         if norm_path not in audio_files:
+            invalid_count += 1
+            # Add zero weight for invalid samples
+            weights.append(0.0)
             continue
             
         label_dict = {
@@ -34,17 +38,26 @@ def calculate_split_weights(data, audio_files):
         valid_samples.append((filename, key))
     
     total_valid = len(valid_samples)
+
+    logging.info(f"Valid samples: {len(valid_samples)}, Invalid samples: {invalid_count}")
     
     # Calculate weights for valid samples
     weights = []
-    for filename, key in valid_samples:
+    for filename, _ in data:
+        norm_path = os.path.normpath(filename)
+        if norm_path not in audio_files:
+            weights.append(0.0)
+            continue
+            
+        key = next(k for f,k in valid_samples if f == filename)
         count = label_counts[key]
-        weight = total_valid / (len(label_counts) * count)
+        weight = 1.0 / (len(label_counts) * count)
         weights.append(weight)
     
-    # Normalize weights to sum to 1
+    # Normalize non-zero weights to sum to 1
     weights = np.array(weights)
-    weights = weights / weights.sum()
+    nonzero_mask = weights > 0
+    weights[nonzero_mask] = weights[nonzero_mask] / weights[nonzero_mask].sum()
     
     return weights
 
