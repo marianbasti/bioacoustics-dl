@@ -346,29 +346,17 @@ class FileAudioDataset(RawAudioDataset):
     # two file format. h5_format = true -> .h5(.hdf5) ; h5_format = false -> .wav
     def __getitem__(self, index):
         import soundfile as sf
-        
+
         fn = self.fnames[index]
         fn = fn if isinstance(self.fnames, list) else fn.as_py()
         fn = self.text_compressor.decompress(fn)
         path_or_fp = os.path.join(self.root_dir, fn)
-
-        # Skip if path is a directory
-        if os.path.isdir(path_or_fp):
-            logger.warning(f"Skipping directory: {path_or_fp}")
-            return {"id": index, "source": None}
-
         _path, slice_ptr = parse_path(path_or_fp)
         if len(slice_ptr) == 2:
-            try:
-                byte_data = read_from_stored_zip(_path, slice_ptr[0], slice_ptr[1])
-                if not is_sf_audio_data(byte_data):
-                    logger.warning(f"Invalid audio data in {_path}")
-                    return {"id": index, "source": None}
-                path_or_fp = io.BytesIO(byte_data)
-            except Exception as e:
-                logger.warning(f"Failed to read zip data from {_path}: {e}")
-                return {"id": index, "source": None}
-        
+            byte_data = read_from_stored_zip(_path, slice_ptr[0], slice_ptr[1])   # root/10.h5/***.wav
+            assert is_sf_audio_data(byte_data)
+            path_or_fp = io.BytesIO(byte_data)
+
         retry = 3
         wav = None
         for i in range(retry):
@@ -376,22 +364,17 @@ class FileAudioDataset(RawAudioDataset):
                 if self.h5_format and self.train_mode == 'train':
                     parts = path_or_fp.split("/")
                     path_or_fp = "/".join(parts[:-1])
-                    try:
-                        path_or_fp = h5py.File(path_or_fp,'r')
-                        wav = path_or_fp[parts[-1]][:]
-                        curr_sample_rate = 32000
-                        break
-                    except Exception as e:
-                        logger.warning(f"Failed to read h5 file {path_or_fp}: {e}")
-                        return {"id": index, "source": None}
+                    path_or_fp = h5py.File(path_or_fp,'r')
+                    wav = path_or_fp[parts[-1]][:]
+                    curr_sample_rate = 32000
+                    break                    
                 else:
                     wav, curr_sample_rate = sf.read(path_or_fp, dtype="float32")
                     break
             except Exception as e:
-                if i == retry - 1:
-                    logger.warning(f"Failed to load {path_or_fp} after {retry} attempts: {e}")
-                    return {"id": index, "source": None}
-                logger.warning(f"Failed to read {path_or_fp}: {e}. Sleeping for {1 * i}")
+                logger.warning(
+                    f"Failed to read {path_or_fp}: {e}. Sleeping for {1 * i}"
+                )
                 time.sleep(1 * i)
 
         if wav is None:
