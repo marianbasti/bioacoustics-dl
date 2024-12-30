@@ -17,16 +17,15 @@ checkpoint:
 
 task:
   _name: anuraset_classification
-  data: /hpc_stor03/sjtu_home/wenxi.chen/mydata/audio/unbalanced_finetune
+  data: /mnt/HPC-share/bioacustica/anuraset/
   downsr_16hz: true
   audio_mae: true
   target_length: 1024
   roll_aug: false
   noise: false
   h5_format: false
-  weights_file: /hpc_stor03/sjtu_home/wenxi.chen/mydata/audio/unbalanced_finetune/weight_train_all.csv
+  weights_file: /mnt/HPC-share/bioacustica/anuraset/weight_train_all.csv
   num_samples: 700
-  replacement: true
   AS2M_finetune: false
   spcv1_finetune: false
   spcv2_eval: false
