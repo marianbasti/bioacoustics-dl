@@ -153,99 +153,99 @@ def write_label_files(extracted_data, output_dir, audio_dir):
                   for path, samples in collect_audio_files(audio_dir)}
     
     def write_set(data, output_file):
+        valid_count = 0
         with open(os.path.join(output_dir, output_file), "w") as f:
             for filename, labels in data:
-                # Check if audio file exists
                 norm_path = os.path.normpath(filename)
                 if norm_path not in audio_files:
                     continue
                     
                 base_filename = os.path.splitext(os.path.basename(filename))[0]
-                
-                # Convert to species-level format
                 level_dict = {}
                 for label in labels.split(','):
                     species, level = label.split('=')
-                    level_dict[species] = level
+                    if level != '0':  # Only include non-zero labels
+                        level_dict[species] = level
                 
-                # Write as species=level pairs
-                level_labels = [f"{species}={level_dict.get(species, '0')}" 
-                              for species in sorted(set(s.split('=')[0] for s in labels.split(',')))]
-                if any(l.endswith(('0','1','2','3')) for l in level_labels):
+                if level_dict:  # Only write if there are valid labels
+                    level_labels = [f"{species}={level_dict[species]}" 
+                                  for species in sorted(level_dict.keys())]
                     f.write(f"{base_filename}\t{' '.join(level_labels)}\n")
-
-    # Split data
-    cutoff = int(0.8 * len(extracted_data))
-    train_data = extracted_data[:cutoff]
-    eval_data = extracted_data[cutoff:]
+                    valid_count += 1
+        return valid_count
     
-    write_set(train_data, "train.lbl")
-    write_set(eval_data, "eval.lbl")
-    logging.info("Finished writing label files")
+    # Process only valid files
+    valid_entries = [(f, l) for f, l in extracted_data 
+                    if os.path.normpath(f) in audio_files]
+    cutoff = int(0.8 * len(valid_entries))
+    
+    train_valid_count = write_set(valid_entries[:cutoff], "train.lbl")
+    eval_valid_count = write_set(valid_entries[cutoff:], "eval.lbl")
+    
+    logging.info(f"Wrote {train_valid_count} train and {eval_valid_count} eval entries")
 
 def write_tsv_files(extracted_data, audio_dir, output_dir):
     logging.info("Writing TSV files")
-    """Write train.tsv and eval.tsv with recursive audio paths."""
+    
+    # Collect valid audio files first
     audio_files = {}
     for path, samples in collect_audio_files(audio_dir):
         normalized_path = os.path.normpath(path)
         audio_files[normalized_path] = (path, samples)
     
-    logging.info(f"Found {len(audio_files)} audio files for TSV generation")
     def write_set(data, output_file):
+        valid_entries = []
         with open(os.path.join(output_dir, output_file), "w") as f:
             f.write(f"{audio_dir}\n")
             for filename, _ in data:
                 rel_path = os.path.normpath(filename)
                 if rel_path in audio_files:
                     path, num_samples = audio_files[rel_path]
-                    base_filename = os.path.basename(path)
-                    f.write(f"{base_filename}\t{num_samples}\n")
+                    valid_entries.append((filename, _))
+                    f.write(f"{path}\t{num_samples}\n")
+        return valid_entries
+
+    # Split data ensuring only valid entries are used
+    all_valid_entries = [(f, l) for f, l in extracted_data if os.path.normpath(f) in audio_files]
+    cutoff = int(0.8 * len(all_valid_entries))
     
-    # Split data
-    cutoff = int(0.8 * len(extracted_data))
-    train_data = extracted_data[:cutoff]
-    eval_data = extracted_data[cutoff:]
+    train_data = all_valid_entries[:cutoff]
+    eval_data = all_valid_entries[cutoff:]
     
-    # Write both TSV and LBL files
-    write_set(train_data, "train.tsv")
-    write_set(eval_data, "eval.tsv")
-    logging.info("Finished writing TSV files")
+    train_valid = write_set(train_data, "train.tsv")
+    eval_valid = write_set(eval_data, "eval.tsv")
+    
+    return train_valid, eval_valid
 
 def main():
     parser = argparse.ArgumentParser(description="Extract labels from a CSV file.")
     parser.add_argument("--input_file", required=True, help="Path to the input CSV file.")
-    parser.add_argument("--output_dir", help="Directory to store output files.")
-    parser.add_argument("--audio_dir", help="Directory containing the audio files.")
+    parser.add_argument("--output_dir", required=True, help="Directory to store output files.")
+    parser.add_argument("--audio_dir", required=True, help="Directory containing the audio files.")
     args = parser.parse_args()
     
     logging.info("Starting label extraction process")
     extracted_data = extract_labels_from_file(args.input_file, args.audio_dir)
     
-    if args.output_dir and args.audio_dir:
-        logging.info(f"Writing output files to {args.output_dir}")
-        os.makedirs(args.output_dir, exist_ok=True)
-        
-        audio_files = {os.path.normpath(path): samples 
-                for path, samples in collect_audio_files(args.audio_dir)}
-
-        # Split data
-        cutoff = int(0.8 * len(extracted_data))
-        train_data = extracted_data[:cutoff]
-        
-        # Write weights only for training set
-        write_weights_file(train_data, audio_files, args.output_dir)
-        
-        # Generate label_descriptors.csv
-        unique_labels = get_unique_labels(extracted_data)
-        write_label_descriptors(unique_labels, 
-                              os.path.join(args.output_dir, "label_descriptors.csv"))
-        
-        # Write TSV files with audio durations
-        write_tsv_files(extracted_data, args.audio_dir, args.output_dir)
-        write_label_files(extracted_data, args.output_dir, args.audio_dir)
-
-        logging.info("Process completed successfully")
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Write TSV files first to get valid entries
+    train_valid, eval_valid = write_tsv_files(extracted_data, args.audio_dir, args.output_dir)
+    
+    # Write label files using only valid entries
+    write_label_files(train_valid + eval_valid, args.output_dir, args.audio_dir)
+    
+    # Generate label descriptors from valid entries only
+    unique_labels = get_unique_labels(train_valid + eval_valid)
+    write_label_descriptors(unique_labels, 
+                          os.path.join(args.output_dir, "label_descriptors.csv"))
+    
+    # Calculate weights for training set
+    audio_files = {os.path.normpath(path): samples 
+                  for path, samples in collect_audio_files(args.audio_dir)}
+    write_weights_file(train_valid, audio_files, args.output_dir)
+    
+    logging.info("Process completed successfully")
 
 if __name__ == "__main__":
     main()
