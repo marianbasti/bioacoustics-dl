@@ -80,6 +80,7 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         return cls(cfg)
 
     def load_dataset(self, split: str, task_cfg: MaeImageClassificationConfig = None, **kwargs):
+        logger.info(f"Loading dataset for split: {split}")
         try:
             super().load_dataset(split, task_cfg, **kwargs)
         except Exception as e:
@@ -93,6 +94,7 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         
         # Ensure the label file exists
         if not os.path.exists(label_path):
+            logger.error(f"Label file not found: {label_path}")
             raise FileNotFoundError(f"Label file not found: {label_path}")
             
         skipped_indices = getattr(self.datasets[split], "skipped_indices", set())
@@ -114,6 +116,7 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
                                 logger.warning(f"Invalid label format in line: {line.strip()}, Error: {str(e)}")
                                 continue
                     all_labels.append(label_vector)
+            logger.info(f"Successfully read labels from {label_path}")
         except Exception as e:
             logger.error(f"Error reading label file {label_path}: {str(e)}")
             raise
@@ -136,6 +139,7 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
             add_to_input=True,
             num_classes=len(self.labels)
         )
+        logger.info(f"Dataset for split {split} loaded successfully with {len(labels)} labels.")
 
     def build_model(self, model_cfg: MaeImageClassificationConfig, from_checkpoint=False):
         # Set num_classes based on number of species in label_descriptors
