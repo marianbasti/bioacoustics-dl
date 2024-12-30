@@ -5,7 +5,6 @@ CUDA_DEVICE="0"
 BATCH_SIZE=96
 MODEL_PATH=""
 SAVE_DIR=""
-DATA_PATH=""
 TARGET_LENGTH=1024
 MIXUP=0.8
 MASK_RATIO=0.2
@@ -13,7 +12,6 @@ PREDICTION_MODE="CLS_TOKEN"
 RESTORE_FILE=""
 PROJECT_DIR="$(pwd)"
 DATA_DIR="${PROJECT_DIR}/data/labeled"
-LABELS_FILE="${DATA_DIR}/labels.csv"
 WEIGHTS_FILE=""
 EAT_DIR="${PROJECT_DIR}/EAT"
 
@@ -34,10 +32,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --save_dir)
             SAVE_DIR="$2"
-            shift 2
-            ;;
-        --data_path)
-            DATA_PATH="$2"
             shift 2
             ;;
         --target_length)
