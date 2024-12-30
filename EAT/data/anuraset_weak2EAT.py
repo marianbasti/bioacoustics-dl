@@ -154,37 +154,45 @@ def write_label_files(extracted_data, output_dir, audio_dir):
     
     def write_set(data, output_file):
         valid_count = 0
+        written_files = set()
         with open(os.path.join(output_dir, output_file), "w") as f:
             for filename, labels in data:
                 norm_path = os.path.normpath(filename)
                 if norm_path not in audio_files:
                     continue
                     
-                base_filename = os.path.splitext(os.path.basename(filename))[0]
+                # Use full relative path instead of just basename
+                # This ensures consistency with TSV files
+                rel_path = os.path.relpath(os.path.join(audio_dir, filename), audio_dir)
+                file_id = os.path.splitext(rel_path)[0]
+                
                 level_dict = {}
                 for label in labels.split(','):
                     species, level = label.split('=')
                     if level != '0':  # Only include non-zero labels
                         level_dict[species] = level
                 
-                if level_dict:  # Only write if there are valid labels
-                    level_labels = [f"{species}={level_dict[species]}" 
-                                  for species in sorted(level_dict.keys())]
-                    f.write(f"{base_filename}\t{' '.join(level_labels)}\n")
-                    valid_count += 1
-        return valid_count
+                # Write entry even if there are no labels
+                level_labels = [f"{species}={level_dict[species]}" 
+                              for species in sorted(level_dict.keys())]
+                f.write(f"{file_id}\t{' '.join(level_labels)}\n")
+                written_files.add(norm_path)
+                valid_count += 1
+                
+        return valid_count, written_files
     
     # Process only valid files
     valid_entries = [(f, l) for f, l in extracted_data 
                     if os.path.normpath(f) in audio_files]
     cutoff = int(0.8 * len(valid_entries))
     
-    train_valid_count = write_set(valid_entries[:cutoff], "train.lbl")
-    eval_valid_count = write_set(valid_entries[cutoff:], "eval.lbl")
+    train_valid_count, train_files = write_set(valid_entries[:cutoff], "train.lbl")
+    eval_valid_count, eval_files = write_set(valid_entries[cutoff:], "eval.lbl")
     
     logging.info(f"Wrote {train_valid_count} train and {eval_valid_count} eval entries")
+    return train_files, eval_files
 
-def write_tsv_files(extracted_data, audio_dir, output_dir):
+def write_tsv_files(extracted_data, audio_dir, output_dir, train_files=None, eval_files=None):
     logging.info("Writing TSV files")
     
     # Collect valid audio files first
@@ -193,16 +201,20 @@ def write_tsv_files(extracted_data, audio_dir, output_dir):
         normalized_path = os.path.normpath(path)
         audio_files[normalized_path] = (path, samples)
     
-    def write_set(data, output_file):
+    def write_set(data, output_file, allowed_files=None):
         valid_entries = []
+        written_count = 0
         with open(os.path.join(output_dir, output_file), "w") as f:
             f.write(f"{audio_dir}\n")
             for filename, _ in data:
                 rel_path = os.path.normpath(filename)
                 if rel_path in audio_files:
-                    path, num_samples = audio_files[rel_path]
-                    valid_entries.append((filename, _))
-                    f.write(f"{path}\t{num_samples}\n")
+                    if allowed_files is None or rel_path in allowed_files:
+                        path, num_samples = audio_files[rel_path]
+                        valid_entries.append((filename, _))
+                        f.write(f"{path}\t{num_samples}\n")
+                        written_count += 1
+        logging.info(f"Wrote {written_count} entries to {output_file}")
         return valid_entries
 
     # Split data ensuring only valid entries are used
@@ -212,8 +224,8 @@ def write_tsv_files(extracted_data, audio_dir, output_dir):
     train_data = all_valid_entries[:cutoff]
     eval_data = all_valid_entries[cutoff:]
     
-    train_valid = write_set(train_data, "train.tsv")
-    eval_valid = write_set(eval_data, "eval.tsv")
+    train_valid = write_set(train_data, "train.tsv", train_files)
+    eval_valid = write_set(eval_data, "eval.tsv", eval_files)
     
     return train_valid, eval_valid
 
@@ -229,11 +241,12 @@ def main():
     
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Write TSV files first to get valid entries
-    train_valid, eval_valid = write_tsv_files(extracted_data, args.audio_dir, args.output_dir)
+    # Write label files first
+    train_files, eval_files = write_label_files(extracted_data, args.output_dir, args.audio_dir)
     
-    # Write label files using only valid entries
-    write_label_files(train_valid + eval_valid, args.output_dir, args.audio_dir)
+    # Then write TSV files using the same file sets
+    train_valid, eval_valid = write_tsv_files(extracted_data, args.audio_dir, args.output_dir,
+                                            train_files, eval_files)
     
     # Generate label descriptors from valid entries only
     unique_labels = get_unique_labels(train_valid + eval_valid)
