@@ -156,7 +156,6 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
             sample = self.datasets[split][i]
             logger.info(f"Final sample {i}: {sample.keys()}")
             
-        logger.info(f"Dataset for split {split} loaded successfully with {len(labels)} labels.")
 
     def build_model(self, model_cfg: MaeImageClassificationConfig, from_checkpoint=False):
         # Set num_classes based on number of species in label_descriptors
