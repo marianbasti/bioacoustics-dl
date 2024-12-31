@@ -150,11 +150,6 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         
         # Log final dataset info
         logger.info(f"Final dataset size for split {split}: {len(self.datasets[split])}")
-        
-        # Log a few samples from final dataset
-        for i in range(min(3, len(self.datasets[split]))):
-            sample = self.datasets[split][i]
-            logger.info(f"Final sample {i}: {sample.keys()}")
             
 
     def build_model(self, model_cfg: MaeImageClassificationConfig, from_checkpoint=False):
