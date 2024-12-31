@@ -351,10 +351,17 @@ class FileAudioDataset(RawAudioDataset):
         fn = fn if isinstance(self.fnames, list) else fn.as_py()
         fn = self.text_compressor.decompress(fn)
         path_or_fp = os.path.join(self.root_dir, fn)
+        # Verify path exists and is a file before proceeding
+        if not os.path.exists(path_or_fp):
+            raise FileNotFoundError(f"Path does not exist: {path_or_fp}")
+        if os.path.isdir(path_or_fp):
+            raise IsADirectoryError(f"Path is a directory, not a file: {path_or_fp}")
+
         _path, slice_ptr = parse_path(path_or_fp)
         if len(slice_ptr) == 2:
-            byte_data = read_from_stored_zip(_path, slice_ptr[0], slice_ptr[1])   # root/10.h5/***.wav
-            assert is_sf_audio_data(byte_data)
+            byte_data = read_from_stored_zip(_path, slice_ptr[0], slice_ptr[1])
+            if not is_sf_audio_data(byte_data):
+                raise ValueError(f"Invalid audio data in {_path}")
             path_or_fp = io.BytesIO(byte_data)
 
         retry = 3
