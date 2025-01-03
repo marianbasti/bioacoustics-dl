@@ -80,10 +80,7 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         return cls(cfg)
 
     def load_dataset(self, split: str, task_cfg: MaeImageClassificationConfig = None, **kwargs):
-        logger.info(f"Loading dataset for split: {split}")
-        
-        # Log the state before loading base dataset
-        logger.info(f"About to load base dataset from: {self.cfg.data}")
+        logger.info(f"Loading dataset for split: {split}\n From path: {self.cfg.data}")
         try:
             super().load_dataset(split, task_cfg, **kwargs)
             logger.info(f"Base dataset loaded. Dataset size: {len(self.datasets[split])}")

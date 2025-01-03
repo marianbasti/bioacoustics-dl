@@ -160,14 +160,12 @@ Después del preentrenamiento, podemos entrenar al modelo para que catogorice au
 ./scripts/finetune.sh \
   --model_path ./checkpoints/pretrain/checkpoint_best.pt \
   --save_dir ./checkpoints/finetune \
-  --data_dir ./data/labeled/audio \
-  --labels ./data/labeled/labels_descriptors.csv 0 \
+  --data_dir ./data/raw/audio \
+  --labels ./data/labeled/labels_descriptors.csv \
   --batch_size 96 \
-  --num_classes 29 \
   --target_length 1024 \
   --mixup 0.8 \
   --mask_ratio 0.2 \
-  --prediction_mode CLS_TOKEN
 ```
 
 Principales parámetros de ajuste fino:
