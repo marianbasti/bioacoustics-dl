@@ -79,25 +79,26 @@ def extract_labels_from_file(input_file, audio_dir):
     
     with open(input_file, mode='r', newline='') as file:
         reader = csv.reader(file)
-        headers = next(reader)  # Read the header
+        headers = next(reader)
         
-        # Extract species column names (skip the first two columns: MONITORING_SITE, AUDIO_FILE_ID)
         species_columns = headers[2:]
         logging.info(f"Found {len(species_columns)} species columns")
         
         row_count = 0
         for row in reader:
-            # Create relative path instead of full path
-            filename = os.path.normpath(f"{row[0]}/{row[1]}.wav")
+            # Handle both nested and flat structures
+            if os.path.sep in row[1]:  # If path contains separators, use as is
+                filename = f"{row[0]}/{row[1]}.wav"
+            else:  # For flat structure, just use the file ID
+                filename = f"{row[1]}.wav"
+            
+            filename = os.path.normpath(filename)
             labels = []
             
-            # Iterate over the species columns (starting from index 2)
-            for i, value in enumerate(row[2:], start=0):  # Start at index 0 for species columns
-                # Store 0..3: if blank, treat as '0' = absent
+            for i, value in enumerate(row[2:], start=0):
                 level = value if value in ['1','2','3'] else '0'
                 labels.append(f"{species_columns[i]}={level}")
             
-            # Join the labels into a single string, separated by commas
             labels_str = ','.join(labels)
             extracted_data.append((filename, labels_str))
             row_count += 1
@@ -148,9 +149,13 @@ def collect_audio_files(audio_dir):
 def write_label_files(extracted_data, output_dir, audio_dir):
     logging.info("Writing label files")
     
-    # First get valid audio files
-    audio_files = {os.path.normpath(path): samples 
-                  for path, samples in collect_audio_files(audio_dir)}
+    # Get valid audio files with both full and base names as keys
+    audio_files = {}
+    for path, samples in collect_audio_files(audio_dir):
+        norm_path = os.path.normpath(path)
+        audio_files[norm_path] = (path, samples)
+        # Also store by basename for flat directory matching
+        audio_files[os.path.basename(norm_path)] = (path, samples)
     
     def write_set(data, output_file):
         valid_count = 0
@@ -158,25 +163,29 @@ def write_label_files(extracted_data, output_dir, audio_dir):
         with open(os.path.join(output_dir, output_file), "w") as f:
             for filename, labels in data:
                 norm_path = os.path.normpath(filename)
-                if norm_path not in audio_files:
+                basename = os.path.basename(norm_path)
+                
+                # Try both full path and basename matching
+                if norm_path in audio_files:
+                    path_key = norm_path
+                elif basename in audio_files:
+                    path_key = basename
+                else:
                     continue
-                    
-                # Use full relative path instead of just basename
-                # This ensures consistency with TSV files
-                rel_path = os.path.relpath(os.path.join(audio_dir, filename), audio_dir)
+                
+                rel_path = audio_files[path_key][0]
                 file_id = os.path.splitext(rel_path)[0]
                 
                 level_dict = {}
                 for label in labels.split(','):
                     species, level = label.split('=')
-                    if level != '0':  # Only include non-zero labels
+                    if level != '0':
                         level_dict[species] = level
                 
-                # Write entry even if there are no labels
                 level_labels = [f"{species}={level_dict[species]}" 
                               for species in sorted(level_dict.keys())]
                 f.write(f"{file_id}\t{' '.join(level_labels)}\n")
-                written_files.add(norm_path)
+                written_files.add(path_key)
                 valid_count += 1
                 
         return valid_count, written_files
@@ -195,11 +204,12 @@ def write_label_files(extracted_data, output_dir, audio_dir):
 def write_tsv_files(extracted_data, audio_dir, output_dir, train_files=None, eval_files=None):
     logging.info("Writing TSV files")
     
-    # Collect valid audio files first
     audio_files = {}
     for path, samples in collect_audio_files(audio_dir):
         normalized_path = os.path.normpath(path)
         audio_files[normalized_path] = (path, samples)
+        # Also store by basename
+        audio_files[os.path.basename(normalized_path)] = (path, samples)
     
     def write_set(data, output_file, allowed_files=None):
         valid_entries = []
@@ -207,13 +217,21 @@ def write_tsv_files(extracted_data, audio_dir, output_dir, train_files=None, eva
         with open(os.path.join(output_dir, output_file), "w") as f:
             f.write(f"{audio_dir}\n")
             for filename, _ in data:
-                rel_path = os.path.normpath(filename)
-                if rel_path in audio_files:
-                    if allowed_files is None or rel_path in allowed_files:
-                        path, num_samples = audio_files[rel_path]
-                        valid_entries.append((filename, _))
-                        f.write(f"{path}\t{num_samples}\n")
-                        written_count += 1
+                norm_path = os.path.normpath(filename)
+                basename = os.path.basename(norm_path)
+                
+                # Try both full path and basename matching
+                if norm_path in audio_files and (allowed_files is None or norm_path in allowed_files):
+                    path, num_samples = audio_files[norm_path]
+                    valid_entries.append((filename, _))
+                    f.write(f"{path}\t{num_samples}\n")
+                    written_count += 1
+                elif basename in audio_files and (allowed_files is None or basename in allowed_files):
+                    path, num_samples = audio_files[basename] 
+                    valid_entries.append((filename, _))
+                    f.write(f"{path}\t{num_samples}\n")
+                    written_count += 1
+                    
         logging.info(f"Wrote {written_count} entries to {output_file}")
         return valid_entries
 
