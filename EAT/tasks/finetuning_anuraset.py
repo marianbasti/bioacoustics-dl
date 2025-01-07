@@ -34,7 +34,7 @@ class MaeImageClassificationConfig(MaeImagePretrainingConfig):
     local_cache_path: Optional[str] = None
 
     rebuild_batches: bool = True
-    label_descriptors: str = "label_descriptors.csv"
+    label_descriptors: Optional[str] = field(default=None, metadata={"help": "path to label descriptors file"})
     labels: str = "lbl"
 
 
@@ -54,7 +54,7 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         
     def load_labels(self):
         labels = {}
-        path = os.path.join(self.cfg.data, self.cfg.label_descriptors)
+        path = self.cfg.label_descriptors if self.cfg.label_descriptors else os.path.join(self.cfg.data, "label_descriptors.csv")
         with open(path, "r") as ldf:
             for line in ldf:
                 if line.strip() == "":
