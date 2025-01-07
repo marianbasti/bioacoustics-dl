@@ -17,8 +17,8 @@ checkpoint:
 
 task:
   _name: anuraset_classification
-  data: /mnt/HPC-share/bioacustica/anuraset/
-  label_descriptors: null  # Will be overridden by command line argument
+  data: /mnt/HPC-share/bioacustica/anuraset/audio/  # Path to audio files
+  metadata_dir: /mnt/HPC-share/bioacustica/anuraset/metadata/  # Path to metadata files
   downsr_16hz: true
   audio_mae: true
   target_length: 1024

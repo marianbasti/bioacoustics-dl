@@ -34,8 +34,12 @@ class MaeImageClassificationConfig(MaeImagePretrainingConfig):
     local_cache_path: Optional[str] = None
 
     rebuild_batches: bool = True
-    label_descriptors: Optional[str] = field(default=None, metadata={"help": "path to label descriptors file"})
+    label_descriptors: str = "label_descriptors.csv"
     labels: str = "lbl"
+    metadata_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "path to metadata directory containing labels and descriptors"}
+    )
 
 
 @register_task("anuraset_classification", dataclass=MaeImageClassificationConfig)
@@ -54,7 +58,8 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         
     def load_labels(self):
         labels = {}
-        path = self.cfg.label_descriptors if self.cfg.label_descriptors else os.path.join(self.cfg.data, "label_descriptors.csv")
+        metadata_dir = self.cfg.metadata_dir or self.cfg.data
+        path = os.path.join(metadata_dir, self.cfg.label_descriptors)
         with open(path, "r") as ldf:
             for line in ldf:
                 if line.strip() == "":
@@ -91,7 +96,8 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
         data_path = self.cfg.data
         task_cfg = task_cfg or self.cfg
         
-        label_path = os.path.join(data_path, f"{split}.{task_cfg.labels}")
+        metadata_dir = task_cfg.metadata_dir or task_cfg.data
+        label_path = os.path.join(metadata_dir, f"{split}.{task_cfg.labels}")
         logger.info(f"Loading labels from: {label_path}")
         
         # Ensure the label file exists

@@ -14,6 +14,7 @@ PROJECT_DIR="$(pwd)"
 DATA_DIR="${PROJECT_DIR}/data/labeled"
 WEIGHTS_FILE=""
 EAT_DIR="${PROJECT_DIR}/EAT"
+METADATA_DIR=""
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -66,6 +67,10 @@ while [[ $# -gt 0 ]]; do
             WEIGHTS_FILE="$2"
             shift 2
             ;;
+        --metadata_dir)
+            METADATA_DIR="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown parameter: $1"
             exit 1
@@ -100,17 +105,23 @@ if [ ! -z "$RESTORE_FILE" ]; then
     RESTORE_ARG="checkpoint.restore_file=$RESTORE_FILE"
 fi
 
+# Construct metadata directory argument
+METADATA_ARG=""
+if [ ! -z "$METADATA_DIR" ]; then
+    METADATA_ARG="task.metadata_dir=$METADATA_DIR"
+fi
+
 # Run training
 python fairseq_cli/hydra_train.py -m \
     --config-dir EAT/config \
     --config-name finetuning_anuraset \
+    $METADATA_ARG \
     checkpoint.save_dir=$SAVE_DIR \
     checkpoint.best_checkpoint_metric=mAP \
     common.user_dir=$EAT_DIR \
     $RESTORE_ARG \
     dataset.batch_size=$BATCH_SIZE \
     task.data=$DATA_DIR \
-    task.label_descriptors=$LABELS_FILE \
     task.h5_format=true \
     task.AS2M_finetune=true \
     task.target_length=$TARGET_LENGTH \
