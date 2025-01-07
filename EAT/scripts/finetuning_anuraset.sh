@@ -59,10 +59,6 @@ while [[ $# -gt 0 ]]; do
             DATA_DIR="$2"
             shift 2
             ;;
-        --labels)
-            LABELS_FILE="$2"
-            shift 2
-            ;;
         --weights)
             WEIGHTS_FILE="$2"
             shift 2
@@ -85,14 +81,9 @@ if [ -z "$MODEL_PATH" ] || [ -z "$SAVE_DIR" ]; then
     exit 1
 fi
 
-# Validate data directory and labels file
+# Validate data directory
 if [ ! -d "$DATA_DIR" ]; then
     echo "Error: Data directory $DATA_DIR does not exist"
-    exit 1
-fi
-
-if [ ! -f "$LABELS_FILE" ]; then
-    echo "Error: Labels file $LABELS_FILE does not exist"
     exit 1
 fi
 
