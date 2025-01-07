@@ -6,23 +6,15 @@
 # can be found in the PATENTS file in the same directory.
 
 import logging
-import sys
 import torch
 import numpy as np
 import os
-
-
-from typing import Optional
 from dataclasses import dataclass, field
 from omegaconf import MISSING
-
 from fairseq.tasks import register_task
 from fairseq.logging import metrics
-from sklearn import metrics as sklearn_metrics
-from .pretraining_AS2M import MaeImagePretrainingTask,MaeImagePretrainingConfig
-
+from .pretraining_AS2M import MaeImagePretrainingTask, MaeImagePretrainingConfig
 from ..data.add_class_target_dataset import AddClassTargetDataset
-
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +36,10 @@ class MaeImageClassificationConfig(MaeImagePretrainingConfig):
 
 @register_task("anuraset_classification", dataclass=MaeImageClassificationConfig)
 class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
-    """ """
-
     cfg: MaeImageClassificationConfig
     
-    def __init__(
-        self,
-        cfg: MaeImageClassificationConfig,
-    ):
+    def __init__(self, cfg: MaeImageClassificationConfig):
         super().__init__(cfg)
-
         self.state.add_factory("labels", self.load_labels)
         
     def load_labels(self):
@@ -206,17 +192,7 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
     def reduce_metrics(self, logging_outputs, criterion):
         super().reduce_metrics(logging_outputs, criterion)
 
-        if "correct" in logging_outputs[0]:
-            zero = torch.scalar_tensor(0.0)
-            correct = sum(log.get("correct", zero) for log in logging_outputs)
-            metrics.log_scalar_sum("_correct", correct)
-
-            metrics.log_derived(
-                "accuracy",
-                lambda meters: 100 * meters["_correct"].sum / meters["sample_size"].sum,
-            )
-            
-        elif "_predictions" in logging_outputs[0]:
+        if "_predictions" in logging_outputs[0]:
             metrics.log_concat_tensor(
                 "_predictions",
                 torch.cat([l["_predictions"].cpu() for l in logging_outputs], dim=0),
@@ -232,9 +208,10 @@ class MaeImageClassificationTask_anuraset(MaeImagePretrainingTask):
                 stats = self.calculate_stats(
                     meters["_predictions"].tensor, meters["_targets"].tensor
                 )
-                return np.nanmean([stat["AP"] for stat in stats])
+                # Return MSE instead of AP since that's what we calculate
+                return np.nanmean([stat["MSE"] for stat in stats[:-1]])  # Exclude global stats
 
-            metrics.log_derived("mAP", compute_stats)            
+            metrics.log_derived("mAP", compute_stats)
 
 
     @property

@@ -3,68 +3,27 @@
 # Default values
 CUDA_DEVICE="0"
 BATCH_SIZE=96
-MODEL_PATH=""
-SAVE_DIR=""
 TARGET_LENGTH=1024
 MIXUP=0.8
 MASK_RATIO=0.2
 PREDICTION_MODE="CLS_TOKEN"
-RESTORE_FILE=""
 PROJECT_DIR="$(pwd)"
 DATA_DIR="${PROJECT_DIR}/data/labeled"
-WEIGHTS_FILE=""
 EAT_DIR="${PROJECT_DIR}/EAT"
+
+# Required parameters with no defaults
+MODEL_PATH=""
+SAVE_DIR=""
 METADATA_DIR=""
+WEIGHTS_FILE=""
+RESTORE_FILE=""
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --cuda)
-            CUDA_DEVICE="$2"
-            shift 2
-            ;;
-        --batch_size)
-            BATCH_SIZE="$2"
-            shift 2
-            ;;
-        --model_path)
-            MODEL_PATH="$2"
-            shift 2
-            ;;
-        --save_dir)
-            SAVE_DIR="$2"
-            shift 2
-            ;;
-        --target_length)
-            TARGET_LENGTH="$2"
-            shift 2
-            ;;
-        --mixup)
-            MIXUP="$2"
-            shift 2
-            ;;
-        --mask_ratio)
-            MASK_RATIO="$2"
-            shift 2
-            ;;
-        --prediction_mode)
-            PREDICTION_MODE="$2"
-            shift 2
-            ;;
-        --restore_file)
-            RESTORE_FILE="$2"
-            shift 2
-            ;;
-        --data_dir)
-            DATA_DIR="$2"
-            shift 2
-            ;;
-        --weights)
-            WEIGHTS_FILE="$2"
-            shift 2
-            ;;
-        --metadata_dir)
-            METADATA_DIR="$2"
+        --cuda|--batch_size|--model_path|--save_dir|--target_length|--mixup|--mask_ratio|--prediction_mode|--restore_file|--data_dir|--weights|--metadata_dir)
+            varname=$(echo ${1#--} | tr '-' '_')
+            eval ${varname}="$2"
             shift 2
             ;;
         *)
@@ -75,11 +34,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate required parameters
-if [ -z "$MODEL_PATH" ] || [ -z "$SAVE_DIR" ]; then
-    echo "Error: model_path and save_dir are required parameters"
-    echo "Usage: ./finetune.sh --model_path /path/to/model --save_dir /path/to/save [options]"
-    exit 1
-fi
+for param in MODEL_PATH SAVE_DIR; do
+    if [ -z "${!param}" ]; then
+        echo "Error: ${param,,} is required"
+        exit 1
+    fi
+done
 
 # Validate data directory
 if [ ! -d "$DATA_DIR" ]; then
@@ -90,35 +50,27 @@ fi
 # Set CUDA device
 export CUDA_VISIBLE_DEVICES=$CUDA_DEVICE
 
-# Construct restore file argument if provided
-RESTORE_ARG=""
-if [ ! -z "$RESTORE_FILE" ]; then
-    RESTORE_ARG="checkpoint.restore_file=$RESTORE_FILE"
-fi
-
-# Construct metadata directory argument
-METADATA_ARG=""
-if [ ! -z "$METADATA_DIR" ]; then
-    METADATA_ARG="task.metadata_dir=$METADATA_DIR"
-fi
+# Construct optional arguments
+OPTIONAL_ARGS=""
+[[ -n "$RESTORE_FILE" ]] && OPTIONAL_ARGS="$OPTIONAL_ARGS checkpoint.restore_file=$RESTORE_FILE"
+[[ -n "$METADATA_DIR" ]] && OPTIONAL_ARGS="$OPTIONAL_ARGS task.metadata_dir=$METADATA_DIR"
+[[ -n "$WEIGHTS_FILE" ]] && OPTIONAL_ARGS="$OPTIONAL_ARGS task.weights_file=$WEIGHTS_FILE"
 
 # Run training
 python fairseq_cli/hydra_train.py -m \
     --config-dir EAT/config \
     --config-name finetuning_anuraset \
-    $METADATA_ARG \
     checkpoint.save_dir=$SAVE_DIR \
     checkpoint.best_checkpoint_metric=mAP \
     common.user_dir=$EAT_DIR \
-    $RESTORE_ARG \
     dataset.batch_size=$BATCH_SIZE \
     task.data=$DATA_DIR \
     task.h5_format=true \
     task.AS2M_finetune=true \
     task.target_length=$TARGET_LENGTH \
     task.roll_aug=true \
-    task.weights_file=$WEIGHTS_FILE \
     model.model_path=$MODEL_PATH \
     model.mixup=$MIXUP \
     ++model.mask_ratio=$MASK_RATIO \
-    model.prediction_mode=PredictionMode.$PREDICTION_MODE
+    model.prediction_mode=PredictionMode.$PREDICTION_MODE \
+    $OPTIONAL_ARGS
